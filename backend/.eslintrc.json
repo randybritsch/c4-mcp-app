@@ -1,0 +1,17 @@
+{
+  "extends": "airbnb-base",
+  "env": {
+    "node": true,
+    "jest": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": 2022
+  },
+  "rules": {
+    "no-console": "off",
+    "consistent-return": "off",
+    "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
+    "max-len": ["error", { "code": 120, "ignoreComments": true }]
+  }
+}

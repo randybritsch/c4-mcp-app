@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="theme-color" content="#1a1a2e">
+  <meta name="description" content="Voice-controlled smart home interface for Control4">
+  
+  <!-- PWA Meta Tags -->
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+  <link rel="apple-touch-icon" href="icons/icon-192.png">
+  
+  <title>C4 Voice Control</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>🏠 C4 Voice Control</h1>
+      <div class="status" id="status">
+        <span class="status-dot offline"></span>
+        <span class="status-text">Offline</span>
+      </div>
+    </header>
+
+    <main>
+      <!-- Voice Control Section -->
+      <section class="voice-section">
+        <button id="recordBtn" class="record-btn" disabled>
+          <svg class="mic-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+            <line x1="12" y1="19" x2="12" y2="23"></line>
+            <line x1="8" y1="23" x2="16" y2="23"></line>
+          </svg>
+          <span class="record-text">Tap to Speak</span>
+        </button>
+
+        <div class="status-message" id="statusMessage"></div>
+        
+        <div class="transcript-container" id="transcriptContainer" style="display: none;">
+          <div class="transcript-label">You said:</div>
+          <div class="transcript" id="transcript"></div>
+        </div>
+      </section>
+
+      <!-- Command Log -->
+      <section class="log-section">
+        <h2>Recent Commands</h2>
+        <div class="command-log" id="commandLog">
+          <div class="log-empty">No commands yet. Tap the microphone to start.</div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Powered by Control4 MCP · Node.js v22</p>
+    </footer>
+  </div>
+
+  <!-- Scripts -->
+  <script src="js/config.js"></script>
+  <script src="js/websocket.js"></script>
+  <script src="js/voice.js"></script>
+  <script src="js/app.js"></script>
+  
+  <!-- Service Worker Registration -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('service-worker.js')
+          .then(reg => console.log('Service Worker registered:', reg.scope))
+          .catch(err => console.error('Service Worker registration failed:', err));
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+require('dotenv').config();
+
+const config = {
+  // Server
+  env: process.env.NODE_ENV || 'development',
+  port: parseInt(process.env.PORT, 10) || 3000,
+  host: process.env.HOST || '0.0.0.0',
+
+  // JWT
+  jwt: {
+    secret: process.env.JWT_SECRET || 'default-secret-change-me',
+    expiry: process.env.JWT_EXPIRY || '7d',
+  },
+
+  // Speech-to-Text
+  stt: {
+    provider: process.env.STT_PROVIDER || 'google',
+    google: {
+      apiKey: process.env.GOOGLE_STT_API_KEY,
+    },
+    azure: {
+      key: process.env.AZURE_STT_KEY,
+      region: process.env.AZURE_STT_REGION || 'eastus',
+    },
+  },
+
+  // LLM
+  llm: {
+    provider: process.env.LLM_PROVIDER || 'openai',
+    openai: {
+      apiKey: process.env.OPENAI_API_KEY,
+      model: process.env.OPENAI_MODEL || 'gpt-4',
+    },
+    anthropic: {
+      apiKey: process.env.ANTHROPIC_API_KEY,
+      model: process.env.ANTHROPIC_MODEL || 'claude-3-opus-20240229',
+    },
+  },
+
+  // Control4 MCP
+  control4: {
+    host: process.env.CONTROL4_HOST || '192.168.1.100',
+    port: parseInt(process.env.CONTROL4_PORT, 10) || 9000,
+    apiKey: process.env.CONTROL4_API_KEY,
+  },
+
+  // Logging
+  logging: {
+    level: process.env.LOG_LEVEL || 'info',
+    file: process.env.LOG_FILE || './logs/app.log',
+  },
+
+  // Rate Limiting
+  rateLimit: {
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS, 10) || 60000,
+    maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS, 10) || 60,
+  },
+
+  // WebSocket
+  websocket: {
+    maxConnections: parseInt(process.env.WS_MAX_CONNECTIONS, 10) || 10,
+    heartbeatInterval: parseInt(process.env.WS_HEARTBEAT_INTERVAL, 10) || 30000,
+  },
+
+  // CORS
+  cors: {
+    origin: process.env.CORS_ORIGIN || '*',
+  },
+};
+
+module.exports = config;
