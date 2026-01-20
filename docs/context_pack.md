@@ -2,54 +2,61 @@
 
 ## Executive Summary
 
-Production-ready PWA voice control system for Control4 home automation via Model Context Protocol (MCP). **Implementation complete** — full-stack application built and tested (6/6 tests passing). Backend: Node.js v22 Express server with WebSocket streaming, cloud STT (Google/Azure), LLM intent parsing (OpenAI/Anthropic), and TCP-based MCP client. Frontend: Offline-capable PWA with MediaRecorder voice capture, WebSocket client with auto-reconnect, and command history. Deployment: Synology DS218+ native (no Docker), <256MB RAM, pure JavaScript only. Ready for icon generation, .env configuration, and device testing.
+Voice-controlled smart home system for Control4 via Model Context Protocol (MCP). **✅ DEPLOYED IN PRODUCTION** — Backend running at http://192.168.1.237:3001 (health check passing, ~65MB RAM, auto-starts via Task Scheduler). Frontend deployed at http://192.168.1.237 via Web Station. Full stack: Node.js v22 Express + WebSocket, cloud STT (Google/Azure), LLM intent (OpenAI/Anthropic), MCP client. PWA with offline-capable Service Worker, MediaRecorder voice capture, auto-reconnect WebSocket. Synology DS218+ (2GB RAM, no Docker, pure JS only). 6/6 tests passing. Control4 Director configured at 192.168.1.142:9000 (protocol placeholder). **Next: Acquire API keys → Test voice pipeline → Implement Control4 protocol → SSL certificate.**
 
-**Status:** Implementation Complete — Ready for Deployment  
-**Next Phase:** PWA icon generation → Deploy to DS218+ → Real Control4 MCP testing
+**Status:** ✅ DEPLOYED — Production Running  
+**Next Phase:** API Keys → Voice Testing → Control4 Protocol → SSL
 
 ---
 
 ## Critical Architecture (6 Bullets)
 
-1. **Voice Pipeline:** Browser MediaRecorder → WebSocket (WEBM_OPUS chunks) → STT API (Google/Azure REST) → LLM Intent Parser (OpenAI GPT-4/Anthropic Claude) → MCP Command → Control4 Director (TCP:9000)
+1. **Voice Pipeline:** Browser MediaRecorder → WebSocket (audio chunks) → Backend STT (Google/Azure) → LLM Intent (OpenAI GPT-4) → MCP Command → Control4 Director TCP:9000 (protocol placeholder)
 
-2. **Authentication:** Device-based JWT (7-day expiry), no user accounts. Frontend gets token from POST /api/v1/auth/token with deviceId, stores in localStorage, passes via Bearer header (REST) or ws query param (WebSocket).
+2. **Production URLs:** Backend http://192.168.1.237:3001 (health, auth, ws endpoints), Frontend http://192.168.1.237 (Web Station/nginx port 80). JWT auth (7-day expiry, 128-char secret), device-based (no user accounts).
 
-3. **WebSocket Protocol:** Client sends `audio-start` → `audio-chunk` (base64) → `audio-end`. Server responds `audio-ready` → `processing` → `transcript` → `intent` → `command-complete` or `error`. Max 10 concurrent connections, 30s heartbeat, correlation IDs per session.
+3. **WebSocket Protocol:** `audio-start` → `audio-chunk` (base64) → `audio-end`. Server: `processing` → `transcript` → `intent` → `command-complete` or `error`. Max 10 connections, 30s heartbeat, correlation IDs.
 
-4. **Constraints:** Synology DS218+ (2GB RAM, dual-core Realtek), Node.js v22 code compatible with 18+, **pure JavaScript only** (no native addons), backend <256MB RAM budget, frontend <10MB bundle.
+4. **Deployment:** Backend at /volume1/web/c4-mcp-app/backend (Task Scheduler auto-start), Frontend copied to /volume1/web/ (Web Station static), Node.js v22 at /volume1/@appstore/Node.js_v22/usr/local/bin/node, logs at /tmp/c4-mcp-app-logs/backend.log.
 
-5. **Error Handling:** Structured AppError class with error codes (USER_INPUT_ERROR, STT_TIMEOUT, MCP_CONNECTION_ERROR, etc.), Winston logging (JSON format, correlation IDs), graceful degradation (STT fallback, LLM retry logic).
+5. **Constraints:** DS218+ (2GB RAM, Realtek RTD1296), Node.js v22 compatible code, **pure JS only** (no native addons), backend <256MB RAM (<65MB actual), frontend <10MB bundle.
 
-6. **Deployment:** Backend via Synology Task Scheduler (persistent process on :3000), Frontend via Web Station (static files), Reverse Proxy for /api/* routing, Let's Encrypt SSL/WSS, rsync-based deployment scripts.
+6. **Critical Missing:** API keys (STT/LLM), Control4 MCP protocol implementation (current placeholder), SSL certificate (HTTP/WS only, not HTTPS/WSS yet).
 
 ---
 
-## Current Working Set (Active Files)
+## Current Working Set (Production Focus)
 
-Since implementation is **complete**, the working set shifts to deployment and validation:
+**Active Configuration & Protocol Files:**
 
-1. **frontend/icons/** (PENDING): 8 PWA icon sizes (72-512px) need generation for manifest.json
-2. **backend/.env** (MANUAL): Template exists (.env.example), requires real API keys (Google STT, OpenAI/Anthropic, Control4 host/port)
-3. **backend/src/services/mcp-client.js** (NEEDS TESTING): TCP client implemented but protocol placeholder — requires real Control4 Director for validation
-4. **scripts/deploy-backend.sh** (READY): Automated deployment to /volume1/web/c4-mcp-app/backend with Task Scheduler setup instructions
-5. **scripts/deploy-frontend.sh** (READY): Automated deployment to /volume1/web/c4-voice with Web Station configuration steps
-6. **backend/src/routes/routes.test.js** (VALIDATED): 6 tests passing — health, auth, voice endpoints validated
-7. **docs/project_overview.md** (CURRENT): Updated with implementation status, ready for ongoing maintenance as project evolves
+1. **backend/.env** (CRITICAL): JWT_SECRET configured, PORT=3001, CONTROL4_HOST=192.168.1.142. **Missing:** GOOGLE_STT_API_KEY, OPENAI_API_KEY (commented out, acquire from Google Cloud Console and OpenAI Platform).
+
+2. **backend/src/services/mcp.js** (PROTOCOL STUB): Placeholder MCP client — sends commands but doesn't execute. **Next:** Implement real Control4 protocol (HTTP API, DriverWorks, or MCP spec).
+
+3. **backend/src/config/index.js** (CONFIG LOADER): Loads all environment variables, validates required fields, exports config object. **Status:** Working, all sections configured.
+
+4. **frontend/js/config.js** (FRONTEND CONFIG): API_URL and WS_URL point to http://192.168.1.237:3001. **Next:** Update to HTTPS/WSS after SSL cert.
+
+5. **start-server.sh** (AUTO-START SCRIPT): Task Scheduler runs at boot with 10s delay. **Status:** Configured and working, server auto-starts after NAS reboot.
+
+6. **docs/project_overview.md** (DOCUMENTATION): Updated 2026-01-20 with deployment status, change history, and deployment guide links. **Status:** Current.
+
+7. **docs/bootstrap_summary.md** (QUICK REFERENCE): Updated with production URLs, status checks, actual deployment details. **Status:** Current.
 
 ---
 
 ## Interfaces/Contracts — DO NOT BREAK
 
 ### REST API (Backend → Frontend)
+- `GET /api/v1/health` → `{status:"healthy",timestamp,uptime,memoryUsage,nodeVersion}` (200) — **✅ Currently responding**
 - `POST /api/v1/auth/token` → `{deviceId}` → `{token, expiresIn}` (200) or `{error, code}` (400/500)
-- `POST /api/v1/voice/process` → `{audioData: base64}` + `Authorization: Bearer <token>` → `{transcript, intent, command, processingTime}` (200) or error (400/401/500)
-- `GET /api/v1/health` → `{status: "ok", timestamp, uptime, memory}` (200)
+- `POST /api/v1/voice/process` → `{audioData: base64}` + `Authorization: Bearer <token>` → `{transcript, intent, command}` (200) or error (400/401/500)
 
 ### WebSocket (Frontend ↔ Backend)
-- **Client Messages:** `{type: "audio-start"}`, `{type: "audio-chunk", data: base64}`, `{type: "audio-end"}`
-- **Server Messages:** `{type: "audio-ready"}`, `{type: "processing"}`, `{type: "transcript", data: {text, confidence}}`, `{type: "intent", data: {action, target, value?, room?}}`, `{type: "command-complete", data: {command}}`, `{type: "error", data: {message, code}}`
-- **Connection:** `ws://host:3000/ws?token=<jwt>`, 30s ping/pong heartbeat, max 10 connections
+- **Connection:** `ws://192.168.1.237:3001/ws?token=<jwt>` (update to wss:// after SSL)
+- **Client:** `{type:"audio-start"}`, `{type:"audio-chunk",data:base64}`, `{type:"audio-end"}`
+- **Server:** `{type:"processing"}`, `{type:"transcript",data:{text,confidence}}`, `{type:"intent",data:{action,target,value?,room?}}`, `{type:"command-complete"}`, `{type:"error",data:{message,code}}`
+- **Limits:** Max 10 connections, 30s heartbeat, rate-limited
 
 ### LLM Intent Schema (LLM → MCP Client)
 ```json
@@ -61,92 +68,146 @@ Since implementation is **complete**, the working set shifts to deployment and v
 }
 ```
 
-### Environment Variables (.env)
-```
+### Environment Variables (.env) — Production Config
+```bash
 NODE_ENV=production
-PORT=3000
-JWT_SECRET=<256-bit>
+PORT=3001  # Changed from 3000 (conflict with Synology web server)
+JWT_SECRET=<128-char-hex>  # ✅ Configured
 LOG_LEVEL=info
-STT_PROVIDER=google|azure
-GOOGLE_STT_API_KEY=<key>
-AZURE_STT_KEY=<key>
-AZURE_STT_REGION=<region>
-LLM_PROVIDER=openai|anthropic
-OPENAI_API_KEY=<key>
-ANTHROPIC_API_KEY=<key>
-MCP_HOST=192.168.1.x
-MCP_PORT=9000
+# STT_PROVIDER=google  # ⚠️ Commented - need API key
+# GOOGLE_STT_API_KEY=<key>
+# LLM_PROVIDER=openai  # ⚠️ Commented - need API key
+# OPENAI_API_KEY=<key>
+CONTROL4_HOST=192.168.1.142  # ✅ Configured
+CONTROL4_PORT=9000
 ```
 
-**Breaking these contracts requires coordinated frontend + backend updates and version migration.**
+**⚠️ Breaking Changes:** Coordinate frontend + backend updates, version migration, test health endpoint after changes.
 
 ---
 
 ## Today's Objectives & Acceptance Criteria
 
 ### Immediate Objectives (Next Session)
-1. **Generate PWA Icons:** Create 8 icon sizes (72, 96, 128, 144, 152, 192, 384, 512px) using brand colors (#1a1a2e background, #e94560 accent)
-2. **Configure Production .env:** Copy .env.example, populate real API keys for Google STT and OpenAI, set Control4 Director IP/port
-3. **Deploy to Synology:** Run deploy-backend.sh and deploy-frontend.sh, configure Task Scheduler and Web Station, validate health endpoint
+1. **Acquire API Keys** (15-30 min):
+   - Google Cloud Console: Enable Speech-to-Text API → Create API Key → Copy
+   - OpenAI Platform: Create secret key → Set usage limit ($50/month) → Copy
+   - Update .env: Uncomment STT_PROVIDER, GOOGLE_STT_API_KEY, LLM_PROVIDER, OPENAI_API_KEY
+   - Restart backend: `pkill -f 'node src/server.js' && /volume1/@appstore/Node.js_v22/usr/local/bin/node src/server.js >> /tmp/c4-mcp-app-logs/backend.log 2>&1 &`
 
-### Acceptance Criteria
-- [ ] PWA manifest loads without 404s on icon paths
-- [ ] Backend starts via Task Scheduler and survives Synology reboot
-- [ ] Frontend accessible at https://c4-voice.local via reverse proxy
-- [ ] WebSocket upgrades successfully over WSS
-- [ ] Health check returns 200 with uptime > 0
-- [ ] Voice recording captures audio and sends chunks to backend
-- [ ] STT transcribes real voice input (test with "turn on kitchen lights")
-- [ ] LLM parses intent correctly (action: "turn_on", target: "lights", room: "kitchen")
-- [ ] MCP client connects to Control4 Director (verify TCP handshake)
+2. **Test Voice Pipeline** (30-60 min):
+   - Open http://192.168.1.237, open DevTools Console
+   - Record voice command: "Turn on kitchen lights"
+   - Verify: WebSocket messages, backend logs show transcript, intent parsing, MCP command attempt
+   - Expected: STT works, LLM parses, Control4 execution fails (placeholder protocol)
+
+3. **Implement Control4 Protocol** (2-8 hours):
+   - Research Control4 Director API (HTTP vs MCP vs DriverWorks)
+   - Update backend/src/services/mcp.js with real protocol
+   - Test simple command: Turn light on/off
+   - Validate: Device responds to voice command
+
+### Acceptance Criteria (Session Success)
+- [x] Backend health endpoint responding at http://192.168.1.237:3001/api/v1/health
+- [x] Frontend accessible at http://192.168.1.237
+- [x] Backend auto-starts via Task Scheduler after NAS reboot
+- [ ] STT API key configured, backend logs show successful transcription
+- [ ] LLM API key configured, backend logs show intent parsing
+- [ ] Voice recording captures audio, sends to backend via WebSocket
+- [ ] Control4 Director receives and executes commands (lights on/off minimum)
+- [ ] End-to-end latency < 3 seconds (voice → command execution)
+- [ ] MCP client connects to Control4 Director at 192.168.1.142:9000 (verify TCP handshake)
 
 ---
 
 ## Guardrails (Conventions — Enforce on All Code)
 
-- **Runtime:** Node.js v22, code compatible with 18+, **pure JavaScript only** (no native C++ addons, no node-gyp)
-- **Style:** ESLint Airbnb, Prettier (2-space indent, 100-char width), semicolons required
-- **Naming:** kebab-case files/dirs, camelCase JS variables/functions, PascalCase classes
-- **Errors:** AppError class with `{code, message, statusCode, details, timestamp}`, Winston logging (JSON), correlation IDs via uuid.v4()
-- **Logging:** Winston (error|warn|info|debug), file + console transports, correlation IDs in all logs, structured JSON format
-- **Testing:** Jest + Supertest, 80% coverage threshold, co-located tests (*.test.js), run `npm test` before commits
-- **Security:** JWT auth (7-day expiry), helmet middleware, CORS whitelist, rate limiting (60 req/min), HTTPS/WSS only in production
-- **Performance:** Backend <256MB RAM, frontend <10MB bundle, STT timeout 10s, LLM timeout 15s, MCP timeout 5s
-- **Commits:** `type(scope): message` format (feat|fix|docs|test|refactor|perf|chore), max 72 chars, imperative mood
-- **Docs:** Update project_overview.md after major changes, inline JSDoc for public APIs, README.md per subsystem
+- **Runtime:** Node.js v22 (/volume1/@appstore/Node.js_v22/usr/local/bin/node), code compatible with 18+, **pure JavaScript only** (no native addons, no node-gyp, no Docker)
+- **Style:** ESLint Airbnb, Prettier (2-space, 100-char), semicolons required
+- **Naming:** kebab-case files/dirs, camelCase JS variables, PascalCase classes
+- **Errors:** AppError class `{code, message, statusCode, details, timestamp}`, Winston JSON logging, correlation IDs (uuid.v4)
+- **Logging:** Winston (error|warn|info|debug), /tmp/c4-mcp-app-logs/backend.log, structured JSON, correlation IDs
+- **Testing:** Jest + Supertest, 80% coverage, co-located *.test.js, `npm test` pre-commit (6/6 passing)
+- **Security:** JWT 7-day, helmet, CORS, rate limit (60/min REST, 10 concurrent WS), HTTPS/WSS after SSL
+- **Performance:** Backend <256MB RAM (actual ~65MB), frontend <10MB bundle, timeouts: STT 10s, LLM 15s, MCP 5s
+- **Commits:** `type(scope): message` (feat|fix|docs|test|refactor|perf|chore), 72 chars, imperative
+- **Docs:** Update project_overview.md after major changes, JSDoc public APIs, README per subsystem
+- **NAS Constraints:** Synology DS218+ (2GB RAM, Realtek RTD1296), no root access, Task Scheduler for auto-start, Web Station for frontend
 
 ---
 
-## Documentation Links
+## Documentation Links (Full Context)
 
-- **[Project Overview](project_overview.md)** — Single source of truth (754 lines, 14 sections)
-- **[Bootstrap Summary](bootstrap_summary.md)** — Quick context reload (620 words)
-- **[Conventions & Guardrails](conventions_guardrails.md)** — Enforceable checklist (290 words)
+- **[Project Overview](project_overview.md)** — Single source of truth (762 lines, deployment status updated 2026-01-20)
+- **[Bootstrap Summary](bootstrap_summary.md)** — Quick context reload (~650 words, production URLs)
+- **[Task Scheduler Setup](../TASK_SCHEDULER_SETUP.md)** — Auto-start configuration guide
+- **[API Keys Guide](../API_KEYS.md)** — Google STT + OpenAI acquisition steps with cost estimates
+- **[Deployment Complete](../DEPLOYMENT_COMPLETE.md)** — Full deployment summary, status checks, next steps
+- **[Conventions & Guardrails](conventions_guardrails.md)** — Enforceable checklist
 - **[Architecture](architecture.md)** — Diagrams, components, tradeoffs
-- **[API Endpoints](api/endpoints.md)** — REST + WebSocket specs
-- **[Module Specs](modules/)** — Frontend PWA, Backend Service, Backend Package
-- **[Operations Runbook](ops/runbook.md)** — Deployment, monitoring, troubleshooting
-- **[Roadmap](roadmap.md)** — Milestones and priorities
-- **[Update Summary](UPDATE_SUMMARY.md)** — Latest session changes
+- **[API Endpoints](api/endpoints.md)** — REST + WebSocket specs with examples
+- **[Operations Runbook](ops/runbook.md)** — Deployment, monitoring, troubleshooting procedures
+- **[Roadmap](roadmap.md)** — Milestones, priorities, target dates
+- **GitHub:** https://github.com/randybritsch/c4-mcp-app (public, 62+ commits)
 
 ---
 
-## Next Prompt to Paste (Suggested)
+## Quick Status Check (Production Health)
 
-```text
-Continue C4 Voice Control project. Implementation is complete (6/6 tests passing). Focus on deployment readiness:
+```bash
+# Backend health (should return JSON with status:"healthy")
+curl http://192.168.1.237:3001/api/v1/health
 
-1. Generate 8 PWA icon sizes (72-512px) with brand colors (#1a1a2e bg, #e94560 accent). Save to frontend/icons/ and verify manifest.json paths.
+# Frontend (should show C4 Voice Control interface)
+http://192.168.1.237
 
-2. Review .env.example and guide me through production configuration (API keys, Control4 IP, JWT secret generation).
+# Server logs (monitor in real-time)
+ssh randybritsch@192.168.1.237 "tail -f /tmp/c4-mcp-app-logs/backend.log"
 
-3. Walk through Synology deployment: execute deploy-backend.sh, configure Task Scheduler, execute deploy-frontend.sh, configure Web Station, set up reverse proxy for HTTPS/WSS.
-
-4. After deployment, run end-to-end test: record voice command "turn on kitchen lights", verify STT → LLM → MCP flow, validate Control4 response.
-
-Follow all guardrails from context_pack.md. Ask clarifying questions before breaking contracts or making architectural changes.
+# Process status (should show node src/server.js running)
+ssh randybritsch@192.168.1.237 "ps aux | grep 'node src/server.js'"
 ```
 
 ---
 
-**Word Count:** ~880 words | **Created:** 2026-01-19 | **Status:** Production-Ready Context Pack
+## Next Prompt to Paste (Immediate Action)
+
+```text
+You are joining the C4 Voice Control project. Load context from this Context Pack.
+
+**Current Status:** ✅ Deployed in production on Synology DS218+ NAS
+- Backend: http://192.168.1.237:3001 (health endpoint responding, ~65MB RAM, auto-starts)
+- Frontend: http://192.168.1.237 (Web Station, PWA interface accessible)
+- Tests: 6/6 passing
+- **Blocking:** API keys missing (Google STT, OpenAI), Control4 protocol is placeholder
+
+**Your Tasks:**
+1. Acknowledge understanding of deployed architecture and production constraints (NAS, Node.js v22, pure JS)
+2. Guide user through API key acquisition:
+   - Google Cloud Console: Enable Speech-to-Text API → Create API Key
+   - OpenAI Platform: Create secret key → Set usage limit ($50/month)
+   - Update /volume1/web/c4-mcp-app/backend/.env (uncomment STT/LLM vars)
+   - Restart backend server
+3. Verify voice pipeline: Test recording → STT → LLM intent parsing (Control4 execution will fail - expected)
+4. If voice pipeline works, discuss Control4 protocol implementation options (HTTP API, MCP spec, DriverWorks)
+
+**Constraints:**
+- Synology DS218+ (2GB RAM, no Docker, no native addons)
+- Pure JavaScript only (Node.js v22 compatible code)
+- Backend must stay <256MB RAM (currently ~65MB)
+- Follow Guardrails block for all code changes
+- Run `npm test` after backend changes (must maintain 6/6 passing)
+
+**Before Making Changes:**
+- Read backend/src/config/index.js to understand configuration structure
+- Check backend/src/services/mcp.js to see current placeholder protocol
+- Review DEPLOYMENT_COMPLETE.md for operational context
+
+Proceed step-by-step. Test after each change. Ask clarifying questions only if critical details are missing.
+```
+
+---
+
+**Word Count:** ~895 words (target: ≤900) ✅  
+**Last Updated:** 2026-01-20  
+**Production Status:** Backend running, frontend accessible, awaiting API keys and Control4 protocol
