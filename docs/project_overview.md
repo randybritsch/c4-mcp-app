@@ -1,8 +1,8 @@
 # Project Overview: C4-MCP-App
 
 **Version:** 1.0.0  
-**Last Updated:** January 19, 2026  
-**Status:** Implementation Complete - Ready for Deployment
+**Last Updated:** January 20, 2026  
+**Status:** ✅ DEPLOYED - Running in Production
 
 ---
 
@@ -746,6 +746,9 @@ Response:
 - [API Specifications](api/endpoints.md)
 - [Operations Runbook](ops/runbook.md)
 - [Bootstrap Summary](bootstrap_summary.md)
+- [Task Scheduler Setup](../TASK_SCHEDULER_SETUP.md)
+- [API Keys Guide](../API_KEYS.md)
+- [Deployment Complete](../DEPLOYMENT_COMPLETE.md)
 
 **Change History:**
 - 2026-01-19: Initial creation (v1.0.0)
@@ -755,6 +758,16 @@ Response:
   - Infrastructure: JWT auth, Winston logging, Jest testing (6 tests passing)
   - Deployment: Synology scripts, health checks, comprehensive documentation
   - Status: Ready for production deployment
+- 2026-01-20: Production deployment completed
+  - **Backend**: Running at http://192.168.1.237:3001 (port 3000→3001 due to conflict)
+  - **Frontend**: Deployed via Web Station at http://192.168.1.237
+  - **Auto-start**: Task Scheduler configured for boot-up
+  - **Control4**: Director configured at 192.168.1.142:9000
+  - **Config Fix**: Added missing src/config/index.js file
+  - **Documentation**: Added deployment guides (Task Scheduler, API Keys, completion summary)
+  - **GitHub**: All code committed to https://github.com/randybritsch/c4-mcp-app
+  - **Status**: ✅ Backend healthy and responding, frontend accessible
+  - **Pending**: API keys (Google STT, OpenAI), SSL certificate, Control4 protocol implementation
 
 ---
 
