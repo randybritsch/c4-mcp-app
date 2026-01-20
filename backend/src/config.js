@@ -41,7 +41,7 @@ module.exports = {
   },
   
   // WebSocket
-  ws: {
+  websocket: {
     heartbeatInterval: 30000, // 30 seconds
     maxConnections: 10,
   },
