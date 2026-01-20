@@ -35,10 +35,14 @@ module.exports = {
   },
   
   // Rate Limiting
-  rateLimitWindow: 15 * 60 * 1000, // 15 minutes
-  rateLimitMax: 100, // requests per window
+  rateLimit: {
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    maxRequests: 100, // requests per window
+  },
   
   // WebSocket
-  wsHeartbeatInterval: 30000, // 30 seconds
-  wsMaxConnections: 10,
+  ws: {
+    heartbeatInterval: 30000, // 30 seconds
+    maxConnections: 10,
+  },
 };
