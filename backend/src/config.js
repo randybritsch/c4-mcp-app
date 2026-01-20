@@ -28,6 +28,12 @@ module.exports = {
   mcpHost: process.env.MCP_HOST,
   mcpPort: parseInt(process.env.MCP_PORT, 10) || 9000,
   
+  // CORS
+  cors: {
+    origin: process.env.CORS_ORIGIN || '*',
+    credentials: true,
+  },
+  
   // Rate Limiting
   rateLimitWindow: 15 * 60 * 1000, // 15 minutes
   rateLimitMax: 100, // requests per window
