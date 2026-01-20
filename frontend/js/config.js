@@ -2,12 +2,12 @@
 const CONFIG = {
   // Update this to your backend server URL
   API_URL: window.location.hostname === 'localhost'
-    ? 'http://localhost:3000'
-    : `https://${window.location.hostname}`,
+    ? 'http://localhost:3001'
+    : 'http://192.168.1.237:3001',
   
   WS_URL: window.location.hostname === 'localhost'
-    ? 'ws://localhost:3000/ws'
-    : `wss://${window.location.hostname}/ws`,
+    ? 'ws://localhost:3001/ws'
+    : 'ws://192.168.1.237:3001/ws',
   
   // Device identification
   DEVICE_ID: getOrCreateDeviceId(),
