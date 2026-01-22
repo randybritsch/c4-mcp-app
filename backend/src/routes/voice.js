@@ -38,4 +38,45 @@ router.post('/process', authMiddleware, async (req, res, next) => {
   }
 });
 
+/**
+ * Process a text command (no STT)
+ * POST /api/v1/voice/process-text
+ * Body: { transcript: string }
+ */
+router.post('/process-text', authMiddleware, async (req, res, next) => {
+  try {
+    const { transcript } = req.body;
+
+    if (!transcript || typeof transcript !== 'string' || transcript.trim().length === 0) {
+      throw new AppError(
+        ErrorCodes.MISSING_PARAMETER,
+        'transcript is required',
+        400
+      );
+    }
+
+    logger.info('Processing text command', {
+      correlationId: req.correlationId,
+      deviceId: req.user.deviceId,
+      transcript,
+    });
+
+    // Reuse the same pipeline but skip STT.
+    const { parseIntent } = require('../services/llm');
+    const mcpClient = require('../services/mcp-client');
+
+    const plan = await parseIntent(transcript, req.correlationId);
+    const command = await mcpClient.sendCommand(plan, req.correlationId);
+
+    res.json({
+      transcript,
+      plan,
+      command,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 module.exports = router;

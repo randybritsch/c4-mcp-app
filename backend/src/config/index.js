@@ -39,8 +39,17 @@ const config = {
 
   // Control4 MCP
   control4: {
-    host: process.env.CONTROL4_HOST || '192.168.1.100',
-    port: parseInt(process.env.CONTROL4_PORT, 10) || 9000,
+    // This backend talks to the c4-mcp HTTP server (not directly to Director).
+    // Example: http://192.168.1.50:3333 (NAS/LAN)
+    mcpBaseUrl:
+      process.env.C4_MCP_BASE_URL ||
+      process.env.MCP_BASE_URL ||
+      'http://127.0.0.1:3333',
+    timeoutMs: parseInt(process.env.C4_MCP_TIMEOUT_MS, 10) || 8000,
+
+    // Back-compat env vars (unused by default):
+    host: process.env.CONTROL4_HOST,
+    port: process.env.CONTROL4_PORT ? parseInt(process.env.CONTROL4_PORT, 10) : undefined,
     apiKey: process.env.CONTROL4_API_KEY,
   },
 

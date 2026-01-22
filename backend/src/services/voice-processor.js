@@ -23,13 +23,13 @@ async function processVoiceCommand(audioData, format, correlationId) {
       );
     }
 
-    // Step 2: Intent Parsing (LLM)
+    // Step 2: Command Planning (LLM)
     logger.info('Step 2: Starting intent parsing', { correlationId });
-    const intent = await parseIntent(sttResult.transcript, correlationId);
+    const plan = await parseIntent(sttResult.transcript, correlationId);
 
-    // Step 3: Execute command via MCP
+    // Step 3: Execute tool call via c4-mcp (HTTP)
     logger.info('Step 3: Executing MCP command', { correlationId });
-    const mcpResult = await mcpClient.sendCommand(intent, correlationId);
+    const mcpResult = await mcpClient.sendCommand(plan, correlationId);
 
     const totalDuration = Date.now() - startTime;
 
@@ -37,13 +37,13 @@ async function processVoiceCommand(audioData, format, correlationId) {
       correlationId,
       totalDuration,
       transcript: sttResult.transcript,
-      intent,
+      plan,
     });
 
     return {
       transcript: sttResult.transcript,
       confidence: sttResult.confidence,
-      intent,
+      plan,
       command: mcpResult,
       processingTime: totalDuration,
       timestamp: new Date().toISOString(),
