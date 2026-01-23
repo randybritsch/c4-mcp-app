@@ -160,10 +160,22 @@ class MCPClient {
 
   async _fetchJson(url, options, correlationId, sessionId) {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this._timeoutMs());
+    const timeoutMs = this._timeoutMs();
+
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        // Abort if possible, but also reject regardless.
+        // In some environments, DNS/connect can ignore AbortController.
+        controller.abort();
+        const err = new Error('MCP request timeout');
+        err.name = 'TimeoutError';
+        reject(err);
+      }, timeoutMs);
+    });
 
     try {
-      const resp = await fetch(url, {
+      const fetchPromise = fetch(url, {
         ...options,
         signal: controller.signal,
         headers: {
@@ -172,6 +184,8 @@ class MCPClient {
           ...(sessionId ? { 'X-Session-Id': String(sessionId) } : {}),
         },
       });
+
+      const resp = await Promise.race([fetchPromise, timeoutPromise]);
 
       const text = await resp.text();
       let json;
@@ -194,12 +208,12 @@ class MCPClient {
 
       return json;
     } catch (error) {
-      if (error.name === 'AbortError') {
+      if (error.name === 'AbortError' || error.name === 'TimeoutError') {
         throw new AppError(
           ErrorCodes.MCP_COMMAND_ERROR,
           'MCP request timeout',
           504,
-          { correlationId, url, timeoutMs: this._timeoutMs() },
+          { correlationId, url, timeoutMs },
         );
       }
       if (error instanceof AppError) throw error;
@@ -210,7 +224,7 @@ class MCPClient {
         { correlationId, url },
       );
     } finally {
-      clearTimeout(timeout);
+      if (timeoutId) clearTimeout(timeoutId);
     }
   }
 
