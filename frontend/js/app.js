@@ -10,6 +10,9 @@ class App {
       statusMessage: document.getElementById('statusMessage'),
       transcriptContainer: document.getElementById('transcriptContainer'),
       transcript: document.getElementById('transcript'),
+      clarificationContainer: document.getElementById('clarificationContainer'),
+      clarificationLabel: document.getElementById('clarificationLabel'),
+      clarificationChoices: document.getElementById('clarificationChoices'),
       commandLog: document.getElementById('commandLog'),
     };
 
@@ -85,6 +88,10 @@ class App {
 
     wsClient.on('command-complete', (message) => {
       this.handleCommandComplete(message);
+    });
+
+    wsClient.on('clarification-required', (message) => {
+      this.handleClarificationRequired(message);
     });
 
     wsClient.on('error', (message) => {
@@ -164,6 +171,15 @@ class App {
     this.elements.transcriptContainer.style.display = 'none';
   }
 
+  hideClarification() {
+    if (this.elements.clarificationContainer) {
+      this.elements.clarificationContainer.style.display = 'none';
+    }
+    if (this.elements.clarificationChoices) {
+      this.elements.clarificationChoices.innerHTML = '';
+    }
+  }
+
   /**
    * Show error message
    */
@@ -177,6 +193,9 @@ class App {
    */
   handleCommandComplete(message) {
     this.updateStatusMessage('Command executed successfully!');
+
+    // Clear any pending clarification UI.
+    this.hideClarification();
     
     // Add to command history
     this.addToCommandLog({
@@ -191,6 +210,54 @@ class App {
     setTimeout(() => {
       this.updateStatusMessage('');
     }, 3000);
+  }
+
+  handleClarificationRequired(message) {
+    const clarification = message.clarification;
+    if (!clarification || !Array.isArray(clarification.candidates) || clarification.candidates.length === 0) {
+      this.showError('Need clarification, but no options were provided');
+      return;
+    }
+
+    // Ensure transcript is visible.
+    this.showTranscript(message.transcript || this.elements.transcript.textContent || '');
+
+    const kind = clarification.kind || 'choice';
+    const query = clarification.query ? ` "${clarification.query}"` : '';
+    const label =
+      kind === 'room'
+        ? `Which room did you mean${query}?`
+        : kind === 'light'
+          ? `Which light did you mean${query}?`
+          : `Which one did you mean${query}?`;
+
+    if (this.elements.clarificationLabel) {
+      this.elements.clarificationLabel.textContent = label;
+    }
+
+    if (!this.elements.clarificationChoices) {
+      this.showError('Clarification UI not available');
+      return;
+    }
+
+    this.elements.clarificationChoices.innerHTML = '';
+
+    clarification.candidates.forEach((c, idx) => {
+      const btn = document.createElement('button');
+      btn.className = 'clarification-choice-btn';
+      btn.type = 'button';
+      btn.textContent = c.name;
+      btn.addEventListener('click', () => {
+        // Disable all buttons while executing.
+        Array.from(this.elements.clarificationChoices.querySelectorAll('button')).forEach((b) => (b.disabled = true));
+        this.updateStatusMessage('Executing...');
+        wsClient.send({ type: 'clarification-choice', choiceIndex: idx });
+      });
+      this.elements.clarificationChoices.appendChild(btn);
+    });
+
+    this.elements.clarificationContainer.style.display = 'block';
+    this.updateStatusMessage('Need clarification');
   }
 
   /**

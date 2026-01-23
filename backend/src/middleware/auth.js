@@ -14,7 +14,7 @@ function authMiddleware(req, res, next) {
       throw new AppError(
         ErrorCodes.UNAUTHORIZED,
         'Missing or invalid authorization header',
-        401
+        401,
       );
     }
 
@@ -44,9 +44,18 @@ function authMiddleware(req, res, next) {
  * Generate JWT token
  */
 function generateToken(payload) {
-  return jwt.sign(payload, config.jwt.secret, {
-    expiresIn: config.jwt.expiry,
-  });
+  const rawExpiry = config.jwt.expiry;
+  const expiry = rawExpiry === undefined || rawExpiry === null ? '' : String(rawExpiry).trim();
+
+  // If expiry is disabled, omit `exp` entirely so the token never expires.
+  // Supported disable values: '', '0', 'none', 'never', 'false'.
+  const disableExpiry = !expiry || ['0', 'none', 'never', 'false'].includes(expiry.toLowerCase());
+
+  if (disableExpiry) {
+    return jwt.sign(payload, config.jwt.secret);
+  }
+
+  return jwt.sign(payload, config.jwt.secret, { expiresIn: expiry });
 }
 
 module.exports = {

@@ -6,12 +6,12 @@ const logger = require('../utils/logger');
  * Transcribe audio using Google Speech-to-Text API
  */
 async function transcribeWithGoogle(audioBase64, format) {
-  const apiKey = config.stt.google.apiKey;
+  const { apiKey } = config.stt.google;
   if (!apiKey) {
     throw new AppError(
       ErrorCodes.STT_ERROR,
       'Google STT API key not configured',
-      500
+      500,
     );
   }
 
@@ -38,7 +38,7 @@ async function transcribeWithGoogle(audioBase64, format) {
           },
           audio: { content: audioBase64 },
         }),
-      }
+      },
     );
 
     if (!response.ok) {
@@ -67,7 +67,7 @@ async function transcribeWithGoogle(audioBase64, format) {
     throw new AppError(
       ErrorCodes.STT_ERROR,
       `Speech-to-text failed: ${error.message}`,
-      500
+      500,
     );
   }
 }
@@ -75,13 +75,13 @@ async function transcribeWithGoogle(audioBase64, format) {
 /**
  * Transcribe audio using Azure Speech-to-Text API
  */
-async function transcribeWithAzure(audioBase64, format) {
+async function transcribeWithAzure(_audioBase64, _format) {
   const { key, region } = config.stt.azure;
   if (!key || !region) {
     throw new AppError(
       ErrorCodes.STT_ERROR,
       'Azure STT credentials not configured',
-      500
+      500,
     );
   }
 
@@ -90,7 +90,7 @@ async function transcribeWithAzure(audioBase64, format) {
   throw new AppError(
     ErrorCodes.STT_ERROR,
     'Azure STT not yet implemented',
-    501
+    501,
   );
 }
 
@@ -115,7 +115,7 @@ async function transcribeAudio(audioBase64, format, correlationId) {
     throw new AppError(
       ErrorCodes.STT_ERROR,
       `Unknown STT provider: ${config.stt.provider}`,
-      500
+      500,
     );
   }
 

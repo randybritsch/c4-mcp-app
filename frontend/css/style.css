@@ -171,6 +171,46 @@ header h1 {
   line-height: 1.6;
 }
 
+.clarification-container {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.clarification-label {
+  font-size: 0.85rem;
+  color: #bbb;
+  margin-bottom: 10px;
+}
+
+.clarification-choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.clarification-choice-btn {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: all 0.2s ease;
+}
+
+.clarification-choice-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.clarification-choice-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+}
+
 /* Log Section */
 .log-section {
   background: var(--card-bg);

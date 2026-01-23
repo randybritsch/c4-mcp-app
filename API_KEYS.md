@@ -22,7 +22,7 @@ To enable full functionality, you'll need API keys for:
 
 ### 2. Large Language Model (LLM)
 
-**Option A: OpenAI GPT-4** (Recommended)
+**Option A: OpenAI** (Recommended)
 - Visit: https://platform.openai.com/
 - Sign up / Log in
 - Go to **API Keys** (left sidebar)
@@ -30,63 +30,61 @@ To enable full functionality, you'll need API keys for:
 - Copy the key immediately (you won't see it again)
 - Set usage limits: **Settings** > **Billing** > **Usage limits**
 
+Model note:
+- This project is tested/stabilized with `gpt-4o-mini`.
+
 **Option B: Anthropic Claude**
+
+Note: The current `c4-mcp-app` backend does not yet implement Anthropic (`LLM_PROVIDER=anthropic` will fail). Keep this section only if you plan to add Anthropic support.
 - Visit: https://console.anthropic.com/
 - Sign up / Log in
 - Go to **API Keys**
 - Click **Create Key**
 - Copy the key
 
-### 3. Control4 Director (Optional for testing)
+### 3. Control4 (via c4-mcp)
+
+This app talks to your Control4 system through the `c4-mcp` HTTP server.
 
 You'll need:
-- **Control4 Director IP**: Find in Composer or check your router's DHCP table
-- **MCP Port**: Default is 9000 (verify in Composer)
+- **c4-mcp base URL**: e.g. `http://192.168.1.237:3334` (NAS/LAN)
 
 ## Adding Keys to .env
 
-SSH into your NAS:
+Where you set env vars depends on how you're running the backend:
+
+- **Synology Container Manager (Compose project):** set variables in the compose project environment (recommended) or an `.env` file consumed by the compose project.
+- **Native Node.js process (legacy):** set variables in `backend/.env` and restart the Node process.
+
+### Container Manager (recommended)
+
+In DSM **Container Manager → Projects → (your compose project, e.g. `c4-voice`)**, add/update backend environment variables:
+
+- `OPENAI_API_KEY`
+- `OPENAI_MODEL=gpt-4o-mini`
+- `STT_PROVIDER=google` and `GOOGLE_STT_API_KEY` (if using Google STT)
+- `C4_MCP_BASE_URL=http://<NAS_IP>:3334`
+
+Then **Rebuild/Recreate** the backend container.
+
+### Native Node.js (legacy)
+
+SSH into your NAS and edit `.env`:
+
 ```bash
-ssh randybritsch@192.168.1.237
+ssh <user>@<NAS_IP>
 cd /volume1/web/c4-mcp-app/backend
 vi .env
 ```
 
-Or use echo commands (easier):
-```bash
-ssh randybritsch@192.168.1.237 << 'EOF'
-cd /volume1/web/c4-mcp-app/backend
-
-# Backup current .env
-cp .env .env.backup
-
-# Add Google STT (replace YOUR_KEY_HERE)
-sed -i 's/#STT_PROVIDER=google/STT_PROVIDER=google/' .env
-sed -i 's/#GOOGLE_STT_API_KEY=your_key_here/GOOGLE_STT_API_KEY=YOUR_KEY_HERE/' .env
-
-# Add OpenAI (replace YOUR_KEY_HERE)
-sed -i 's/#LLM_PROVIDER=openai/LLM_PROVIDER=openai/' .env
-sed -i 's/#OPENAI_API_KEY=your_key_here/OPENAI_API_KEY=YOUR_KEY_HERE/' .env
-
-# Add Control4 (replace IP and port if needed)
-sed -i 's/#MCP_HOST=192.168.1.100/MCP_HOST=192.168.1.XXX/' .env
-sed -i 's/#MCP_PORT=9000/MCP_PORT=9000/' .env
-
-# Restart server
-pkill -f 'node src/server.js'
-sleep 2
-/volume1/@appstore/Node.js_v22/usr/local/bin/node src/server.js >> /tmp/c4-mcp-app-logs/backend.log 2>&1 &
-EOF
-```
-
-## Manual .env Configuration
+## Manual .env Configuration (legacy native Node)
 
 Edit `/volume1/web/c4-mcp-app/backend/.env` to look like this:
 
 ```env
 # Node.js Environment
 NODE_ENV=production
-PORT=3001
+PORT=3002
 
 # Authentication
 JWT_SECRET=0c0b083346be6a8845344fc802db8bd4884ff03f468d751050e4f66d2297fa59a311e6996979806035efb29e83df6ee8025bb61307c62c5fd7a85a8e16f3c5b0
@@ -101,10 +99,11 @@ GOOGLE_STT_API_KEY=YOUR_GOOGLE_API_KEY_HERE
 # LLM
 LLM_PROVIDER=openai
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY_HERE
+OPENAI_MODEL=gpt-4o-mini
 
-# Control4 MCP
-MCP_HOST=192.168.1.XXX
-MCP_PORT=9000
+# Control4 (via c4-mcp HTTP server)
+C4_MCP_BASE_URL=http://192.168.1.237:3334
+C4_MCP_TIMEOUT_MS=8000
 ```
 
 ## Verify Configuration
@@ -116,14 +115,13 @@ After adding keys and restarting:
 ssh randybritsch@192.168.1.237 "tail -20 /tmp/c4-mcp-app-logs/backend.log"
 
 # Test health endpoint
-curl http://192.168.1.237:3001/api/v1/health
+curl http://192.168.1.237:3002/api/v1/health
 ```
 
 ## Cost Estimates
 
 - **Google STT**: ~$0.006 per 15 seconds of audio ($0.024/minute)
-- **OpenAI GPT-4**: ~$0.03 per 1K input tokens, ~$0.06 per 1K output
-- **Anthropic Claude 3 Opus**: ~$0.015 per 1K input tokens, ~$0.075 per 1K output
+- OpenAI pricing varies by model; `gpt-4o-mini` is typically much cheaper than GPT-4-class models.
 
 Typical voice command cost: ~$0.01-0.05 per command
 

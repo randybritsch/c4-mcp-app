@@ -2,8 +2,8 @@
 
 **Module ID:** BACKEND-001  
 **Version:** 1.0.0  
-**Status:** Planning  
-**Last Updated:** January 19, 2026
+**Status:** Implemented  
+**Last Updated:** January 23, 2026
 
 > [← Back to Module Index](README.md) | [← Project Overview](../project_overview.md)
 
@@ -13,7 +13,7 @@
 
 ### Purpose
 
-The Backend Service is the central coordination layer that receives voice and text commands from the PWA, orchestrates cloud-based AI services (STT and LLM), translates natural language intents into MCP commands, and streams real-time status updates back to the client. It runs as a persistent Node.js process on the Synology DS218+.
+The Backend Service is the central coordination layer that receives voice and text commands from the PWA, orchestrates cloud-based AI services (STT and LLM), translates natural language intents into `c4-mcp` tool calls, and streams real-time status updates back to the client. It typically runs as a container on the Synology NAS.
 
 ### Key Characteristics
 
@@ -22,14 +22,14 @@ The Backend Service is the central coordination layer that receives voice and te
 - **Runtime:** Synology DS218+ (2GB RAM, dual-core CPU)
 - **Architecture:** Monolithic service with modular internal structure
 - **Communication:** REST API + WebSocket for bidirectional streaming
-- **Process Management:** Synology Task Scheduler (boot-up script)
+- **Process Management:** Synology Container Manager (Compose project)
 - **Dependencies:** Pure JavaScript packages only; avoid native C++ addons
 
 ### Dependencies
 
 - **Upstream:** PWA Frontend (HTTP/WebSocket), Cloud STT API, Cloud LLM API
 - **Downstream:** MCP Server (Control4 integration)
-- **External:** Cloud APIs (Google/Azure STT, OpenAI/Anthropic LLM)
+- **External:** Cloud APIs (Google/Azure STT, OpenAI LLM; tested with `gpt-4o-mini`)
 
 ---
 
@@ -37,7 +37,7 @@ The Backend Service is the central coordination layer that receives voice and te
 
 ### Core Functionality
 
-- **API Gateway:** Expose REST endpoints for voice, chat, device status
+- **API Gateway:** Expose REST endpoints for auth + voice/text processing
 - **WebSocket Server:** Maintain persistent connections for real-time updates
 - **STT Integration:** Send audio to cloud STT service, receive transcripts
 - **LLM Integration:** Send transcripts to cloud LLM, parse intents
@@ -96,16 +96,15 @@ See [API Endpoints Documentation](../api/endpoints.md) for full specs. Summary:
 
 | Method | Path | Purpose | Auth |
 |--------|------|---------|------|
-| POST | `/api/v1/voice` | Submit voice audio | Required |
-| POST | `/api/v1/chat` | Submit text message | Required |
-| GET | `/api/v1/devices` | List Control4 devices | Required |
-| GET | `/api/v1/status` | Get device states | Required |
-| POST | `/api/v1/auth/login` | Authenticate user | No |
+| POST | `/api/v1/auth/token` | Get a device JWT | No |
 | GET | `/api/v1/health` | Health check | No |
+| GET | `/api/v1/health/mcp` | Backend → `c4-mcp` connectivity | No |
+| POST | `/api/v1/voice/process` | Process a voice audio payload | Required |
+| POST | `/api/v1/voice/process-text` | Process a text command | Required |
 
 ### 3.4 WebSocket Protocol
 
-**Connection:** `wss://home.yourdomain.com/api/v1/ws?token=<JWT>`
+**Connection:** `wss://home.yourdomain.com/ws?token=<JWT>`
 
 **Client → Server Messages:**
 
@@ -431,113 +430,54 @@ Use structured JSON logging (Winston or Pino).
 
 ### Environment Variables
 
-File: `/volume1/apps/c4-mcp-app/backend/.env`
+These are typically set as **container environment variables** (Compose), or via a local `backend/.env` for development.
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `PORT` | HTTP server port | `3001` | No |
-| `NODE_ENV` | Environment (development/production) | `production` | No |
-| `LOG_LEVEL` | Logging level (DEBUG/INFO/WARN/ERROR) | `INFO` | No |
-| `STT_PROVIDER` | STT service (google/azure/aws) | `google` | Yes |
-| `STT_API_KEY` | Cloud STT API key | - | Yes |
-| `LLM_PROVIDER` | LLM service (openai/anthropic) | `openai` | Yes |
-| `LLM_API_KEY` | Cloud LLM API key | - | Yes |
-| `LLM_MODEL` | Model name (gpt-4, claude-3-opus) | `gpt-4` | Yes |
-| `MCP_SERVER_URL` | MCP server endpoint | `http://192.168.1.200:8080` | Yes |
-| `MCP_API_KEY` | MCP server auth token (if required) | - | No |
+| `PORT` | HTTP server port | `3000` (prod typically `3002`) | No |
+| `NODE_ENV` | Environment (development/production) | `development` | No |
+| `LOG_LEVEL` | Logging level (error/warn/info/debug) | `info` | No |
+| `LOG_FILE` | Log file path | `./logs/app.log` | No |
 | `JWT_SECRET` | Secret for signing JWTs | - | Yes |
-| `JWT_EXPIRY` | Token expiry duration | `30d` | No |
-| `MAX_AUDIO_SIZE` | Max audio size in bytes | `5242880` (5MB) | No |
-| `REQUEST_TIMEOUT` | Timeout for external API calls (ms) | `30000` | No |
+| `JWT_EXPIRY` | Token expiry duration | `7d` | No |
+| `STT_PROVIDER` | STT service (google/azure) | `google` | No |
+| `GOOGLE_STT_API_KEY` | Google STT API key | - | If `STT_PROVIDER=google` |
+| `AZURE_STT_KEY` | Azure STT key | - | If `STT_PROVIDER=azure` |
+| `AZURE_STT_REGION` | Azure STT region | `eastus` | If `STT_PROVIDER=azure` |
+| `LLM_PROVIDER` | LLM service (openai/anthropic) | `openai` | No |
+| `OPENAI_API_KEY` | OpenAI API key | - | If `LLM_PROVIDER=openai` |
+| `OPENAI_MODEL` | OpenAI model name | `gpt-4o-mini` | If `LLM_PROVIDER=openai` |
+| `ANTHROPIC_API_KEY` | Anthropic API key | - | If `LLM_PROVIDER=anthropic` (not implemented) |
+| `ANTHROPIC_MODEL` | Anthropic model name | `claude-3-opus-20240229` | If `LLM_PROVIDER=anthropic` (not implemented) |
+| `C4_MCP_BASE_URL` | Base URL of `c4-mcp` HTTP server | `http://127.0.0.1:3333` | Yes (recommended in Compose: `http://c4-mcp:3333`; host/LAN: `http://<NAS_IP>:3334`) |
+| `C4_MCP_TIMEOUT_MS` | Timeout for calls to `c4-mcp` (ms) | `8000` | No |
 
-### Configuration File (Optional)
+### Notes
 
-`config/default.json`:
-
-```json
-{
-  "server": {
-    "port": 3001,
-    "cors": {
-      "origin": "*",
-      "methods": ["GET", "POST", "OPTIONS"]
-    }
-  },
-  "cloudAPIs": {
-    "stt": {
-      "retries": 2,
-      "timeout": 10000
-    },
-    "llm": {
-      "retries": 2,
-      "timeout": 15000,
-      "systemPrompt": "You are a Control4 home automation assistant..."
-    }
-  },
-  "mcp": {
-    "retries": 3,
-    "timeout": 5000
-  }
-}
-```
+- The backend currently loads configuration from environment variables (see `backend/src/config/index.js`).
+- `LLM_PROVIDER=anthropic` currently throws `Anthropic LLM not yet implemented` (see `backend/src/services/llm.js`).
+- The `c4-mcp` server is a separate service; this backend does not talk directly to Director.
 
 ---
 
 ## 10. Operational Notes {#operations}
 
-### Deployment Steps (Synology DS218+)
+### Deployment Steps (Container Manager / Compose)
 
-1. **Install Node.js:**
-   - Install via Synology Package Center (Node.js v18)
-   - Or manually via SSH: `wget` and extract Node.js binary
+Reference deployment runs the backend as a container in a **Synology Container Manager Compose Project**.
 
-2. **Upload Backend Code:**
-   ```bash
-   scp -r backend/ admin@<NAS_IP>:/volume1/apps/c4-mcp-app/
-   ```
+1. **Configure env vars** (Compose project / container env):
+  - `OPENAI_API_KEY`, `OPENAI_MODEL=gpt-4o-mini`
+  - `STT_PROVIDER` + STT key(s)
+  - `C4_MCP_BASE_URL=http://c4-mcp:3333` (recommended when backend runs in the same Compose project)
 
-3. **Install Dependencies:**
-   ```bash
-   ssh admin@<NAS_IP>
-   cd /volume1/apps/c4-mcp-app/backend
-   npm install --production
-   ```
+2. **Build / Rebuild + Recreate** the backend service in Container Manager.
 
-4. **Configure Environment:**
-   ```bash
-   cp .env.example .env
-   nano .env  # Edit with your API keys
-   chmod 600 .env
-   ```
-
-5. **Create Startup Script:**
-   ```bash
-   nano /volume1/apps/c4-mcp-app/scripts/start-backend.sh
-   ```
-   
-   Content:
-   ```bash
-   #!/bin/bash
-   cd /volume1/apps/c4-mcp-app/backend
-   /usr/local/bin/node src/server.js >> /var/log/c4-mcp-app.log 2>&1 &
-   ```
-
-6. **Configure Task Scheduler:**
-   - DSM → Control Panel → Task Scheduler
-   - Create → Triggered Task → User-defined script
-   - Event: Boot-up
-   - Script: `/volume1/apps/c4-mcp-app/scripts/start-backend.sh`
-
-7. **Start Service:**
-   ```bash
-   sudo /volume1/apps/c4-mcp-app/scripts/start-backend.sh
-   ```
-
-8. **Verify:**
-   ```bash
-   curl http://localhost:3001/api/v1/health
-   # Expected: {"status":"ok"}
-   ```
+3. **Verify**:
+  ```bash
+  curl http://<NAS_IP>:3002/api/v1/health
+  curl http://<NAS_IP>:3002/api/v1/health/mcp
+  ```
 
 ### Common Issues and Troubleshooting
 

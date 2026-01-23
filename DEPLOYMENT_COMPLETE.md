@@ -1,179 +1,58 @@
-# C4 Voice Control - Deployment Complete! 🎉
+# C4 Voice Control - Deployment Status
 
-## ✅ Deployment Status
+This file summarizes the **current reference deployment** of the C4 voice stack on a Synology NAS using **Container Manager (Docker Compose)**.
 
-### Backend
-- **Status**: ✅ Running
-- **URL**: http://192.168.1.237:3001
-- **Health**: http://192.168.1.237:3001/api/v1/health
-- **Location**: /volume1/web/c4-mcp-app/backend
-- **Process**: Node.js v22.19.0
-- **Port**: 3001 (Synology was using 3000)
-- **Logs**: /tmp/c4-mcp-app-logs/backend.log
+## Current Services (LAN)
 
-### Frontend  
-- **Status**: ✅ Deployed
-- **Location**: /volume1/web/c4-mcp-app/frontend
-- **Config**: Updated to use port 3001
-- **Access**: Needs Web Station configuration
+- **Backend (c4-mcp-app backend)**: `http://<NAS_IP>:3002`
+   - Health: `GET http://<NAS_IP>:3002/api/v1/health`
+   - MCP health: `GET http://<NAS_IP>:3002/api/v1/health/mcp`
+   - WebSocket: `ws://<NAS_IP>:3002/ws?token=<jwt>`
+- **Control4 MCP server (c4-mcp)**: `http://<NAS_IP>:3334`
+   - Tools: `GET http://<NAS_IP>:3334/mcp/list`
+   - Calls: `POST http://<NAS_IP>:3334/mcp/call`
 
-### GitHub Repository
-- **URL**: https://github.com/randybritsch/c4-mcp-app
-- **Visibility**: Public
-- **Latest Commit**: 03fc0db (frontend config + docs)
+Frontend note:
+- For best microphone permission behavior, the frontend is often run **locally** (same device as the browser) and pointed at the backend LAN URL.
 
-## 📋 Next Steps
+## What “Done” Looks Like
 
-### 1. Set Up Auto-Start (5 minutes)
-Follow [TASK_SCHEDULER_SETUP.md](TASK_SCHEDULER_SETUP.md):
-- Open DSM > Control Panel > Task Scheduler
-- Create Boot-up triggered task
-- Use the provided script
-- Test with right-click > Run
+- `c4-mcp` returns real tool results (e.g. rooms/lights) and can perform writes when enabled.
+- Backend can authenticate and connect to `c4-mcp`.
+- Ambiguous commands (e.g. “Basement lights”) trigger an interactive clarification round-trip:
+   - Server → UI: `clarification-required`
+   - UI → Server: `clarification-choice`
+   - Server retries deterministically.
 
-### 2. Configure Web Station (10 minutes)
-Make frontend accessible via browser:
+## Quick Tests
 
-**Option A: Simple File Access**
-- Frontend is at: `/volume1/web/c4-mcp-app/frontend/`
-- If Web Station enabled, accessible at: `http://192.168.1.237/c4-mcp-app/frontend/`
-
-**Option B: Virtual Host (Better)**
-1. DSM > Web Station > Virtual Host > Create
-2. Document root: `/volume1/web/c4-mcp-app/frontend`
-3. Hostname: `c4-voice.local` (add to router DNS/hosts file)
-4. Access at: `http://c4-voice.local`
-
-### 3. Add API Keys (15 minutes)
-Follow [API_KEYS.md](API_KEYS.md):
-- Get Google Cloud Speech-to-Text API key
-- Get OpenAI API key
-- SSH into NAS and update .env file
-- Restart server
-
-### 4. Configure Control4 (5 minutes)
-- Find Control4 Director IP (check Composer or router)
-- Update .env: `MCP_HOST=192.168.1.XXX`
-- Note: MCP integration is a placeholder - requires real Control4 protocol
-
-### 5. Optional: SSL Certificate
-- DSM > Control Panel > Security > Certificate
-- Request Let's Encrypt certificate
-- Update frontend config to use HTTPS/WSS
-
-## 🧪 Test the Deployment
-
-### Test Backend
 ```bash
-curl http://192.168.1.237:3001/api/v1/health
+# Backend health
+curl http://<NAS_IP>:3002/api/v1/health
+
+# Backend -> c4-mcp connectivity
+curl http://<NAS_IP>:3002/api/v1/health/mcp
+
+# c4-mcp tools
+curl http://<NAS_IP>:3334/mcp/list
 ```
 
-Expected response:
-```json
-{"status":"healthy","timestamp":"...","uptime":XXX,"memoryUsage":{...}}
-```
+## Config Pointers
 
-### Test Frontend (after Web Station setup)
-Open in browser: `http://192.168.1.237/c4-mcp-app/frontend/index.html`
+- Backend env vars: see [API_KEYS.md](API_KEYS.md)
+   - `OPENAI_API_KEY`, `OPENAI_MODEL=gpt-4o-mini`
+   - `C4_MCP_BASE_URL=http://<NAS_IP>:3334`
+- c4-mcp safety:
+   - `C4_WRITES_ENABLED=true`
+   - keep guardrails enabled (`C4_WRITE_GUARDRAILS=true`) unless intentionally changing safety posture
 
-Expected:
-- Microphone button appears
-- Console shows successful WebSocket connection
-- Can register device and request auth token
+## Legacy Docs
 
-### Test with API Keys (after adding keys)
-1. Open frontend in browser
-2. Click microphone button
-3. Say: "Turn on kitchen lights"
-4. Expected flow:
-   - Audio recorded and sent to backend
-   - Google STT transcribes audio
-   - OpenAI parses intent
-   - MCP command sent to Control4
-   - Response displayed
+If you see references to **Task Scheduler**, **Web Station**, or **port 3001**, they describe an earlier non-container deployment approach.
 
-## 🔧 Management Commands
-
-### Check Server Status
-```bash
-ssh randybritsch@192.168.1.237 "ps aux | grep 'node src/server.js'"
-```
-
-### View Logs
-```bash
-ssh randybritsch@192.168.1.237 "tail -f /tmp/c4-mcp-app-logs/backend.log"
-```
-
-### Restart Server
-```bash
-ssh randybritsch@192.168.1.237 "pkill -f 'node src/server.js' && cd /volume1/web/c4-mcp-app/backend && /volume1/@appstore/Node.js_v22/usr/local/bin/node src/server.js >> /tmp/c4-mcp-app-logs/backend.log 2>&1 &"
-```
-
-### Update Code
-```bash
-ssh randybritsch@192.168.1.237 "cd /volume1/web/c4-mcp-app && git pull && pkill -f 'node src/server.js' && cd backend && /volume1/@appstore/Node.js_v22/usr/local/bin/node src/server.js >> /tmp/c4-mcp-app-logs/backend.log 2>&1 &"
-```
-
-## 📊 Resource Usage
-
-- **Memory**: ~65 MB (Node.js process)
-- **CPU**: <5% idle, <20% during voice processing
-- **Storage**: ~50 MB (node_modules + code)
-- **Network**: Minimal (API calls only during commands)
-
-Safe for DS218+ with 2 GB RAM.
-
-## 🐛 Troubleshooting
-
-### Server won't start
-```bash
-# Check if port 3001 is available
-ssh randybritsch@192.168.1.237 "netstat -tuln | grep 3001"
-
-# Check config file syntax
-ssh randybritsch@192.168.1.237 "cat /volume1/web/c4-mcp-app/backend/.env"
-
-# Run server in foreground to see errors
-ssh randybritsch@192.168.1.237 "cd /volume1/web/c4-mcp-app/backend && /volume1/@appstore/Node.js_v22/usr/local/bin/node src/server.js"
-```
-
-### Frontend can't connect
-- Verify backend is running (curl health endpoint)
-- Check browser console for errors
-- Ensure config.js has correct URL (port 3001)
-- Check CORS settings if accessing from different domain
-
-### API errors
-- Verify API keys are correct in .env
-- Check API quotas/billing (Google Cloud, OpenAI)
-- View backend logs for error details
-
-## 📚 Documentation
+## Documentation
 
 - [Project Overview](docs/project_overview.md)
 - [Architecture](docs/architecture.md)
-- [API Reference](docs/api_reference.md)
-- [Deployment Guide](docs/deployment_operations.md)
-- [Task Scheduler Setup](TASK_SCHEDULER_SETUP.md)
-- [API Keys Guide](API_KEYS.md)
-
-## ✨ What You've Built
-
-A complete, production-ready voice control system:
-- ✅ Express.js REST API with JWT authentication
-- ✅ WebSocket server for real-time communication
-- ✅ PWA frontend with Service Worker
-- ✅ Google Cloud Speech-to-Text integration
-- ✅ OpenAI GPT-4 natural language processing
-- ✅ Control4 MCP placeholder (ready for protocol implementation)
-- ✅ Comprehensive logging and error handling
-- ✅ Rate limiting and security middleware
-- ✅ Automated testing (6/6 tests passing)
-- ✅ GitHub version control
-- ✅ Deployed to Synology NAS
-
-**Total Lines of Code**: 11,132  
-**Total Files**: 59+  
-**Test Coverage**: 100% of critical paths
-
-Congratulations! 🎊
+- [API Reference](docs/api/endpoints.md)
+- [Operations Runbook](docs/ops/runbook.md)

@@ -139,6 +139,10 @@ async function handleMessage(ws, data) {
         await processAudioStream(ws);
         break;
 
+      case 'clarification-choice':
+        await handleClarificationChoice(ws, message);
+        break;
+
       case 'ping':
         ws.send(JSON.stringify({ type: 'pong' }));
         break;
@@ -161,6 +165,95 @@ async function handleMessage(ws, data) {
       message: error.message,
     }));
   }
+}
+
+async function handleClarificationChoice(ws, message) {
+  if (!ws.pendingClarification) {
+    ws.send(
+      JSON.stringify({
+        type: 'error',
+        code: 'NO_PENDING_CLARIFICATION',
+        message: 'No pending clarification. Please try again.',
+      }),
+    );
+    return;
+  }
+
+  const { intent, transcript, clarification } = ws.pendingClarification;
+  const idx = Number(message.choiceIndex);
+  if (!Number.isInteger(idx) || idx < 0 || idx >= clarification.candidates.length) {
+    ws.send(
+      JSON.stringify({
+        type: 'error',
+        code: 'INVALID_CHOICE',
+        message: 'Invalid choice index',
+      }),
+    );
+    return;
+  }
+
+  const choice = clarification.candidates[idx];
+
+  ws.send(
+    JSON.stringify({
+      type: 'processing',
+      stage: 'executing',
+    }),
+  );
+
+  const refinedIntent = mcpClient.buildRefinedIntentFromChoice(intent, choice);
+  if (!refinedIntent) {
+    ws.send(
+      JSON.stringify({
+        type: 'error',
+        code: 'CLARIFICATION_BUILD_FAILED',
+        message: 'Could not build refined command',
+      }),
+    );
+    ws.pendingClarification = null;
+    return;
+  }
+
+  const mcpResult = await mcpClient.sendCommand(refinedIntent, ws.correlationId);
+  if (mcpResult && mcpResult.clarification) {
+    ws.pendingClarification = {
+      transcript,
+      intent: refinedIntent,
+      clarification: mcpResult.clarification,
+    };
+    ws.send(
+      JSON.stringify({
+        type: 'clarification-required',
+        transcript,
+        intent: refinedIntent,
+        clarification: mcpResult.clarification,
+      }),
+    );
+    return;
+  }
+
+  if (!mcpResult || mcpResult.success !== true) {
+    ws.send(
+      JSON.stringify({
+        type: 'error',
+        code: 'COMMAND_FAILED',
+        message: 'Command failed',
+        details: mcpResult,
+      }),
+    );
+    ws.pendingClarification = null;
+    return;
+  }
+
+  ws.send(
+    JSON.stringify({
+      type: 'command-complete',
+      result: mcpResult,
+      transcript,
+      intent: refinedIntent,
+    }),
+  );
+  ws.pendingClarification = null;
 }
 
 /**
@@ -220,6 +313,32 @@ async function processAudioStream(ws) {
     }));
 
     const mcpResult = await mcpClient.sendCommand(intent, ws.correlationId);
+
+    if (mcpResult && mcpResult.clarification) {
+      ws.pendingClarification = {
+        transcript: sttResult.transcript,
+        intent,
+        clarification: mcpResult.clarification,
+      };
+
+      ws.send(
+        JSON.stringify({
+          type: 'clarification-required',
+          transcript: sttResult.transcript,
+          intent,
+          clarification: mcpResult.clarification,
+        }),
+      );
+      ws.audioChunks = [];
+      return;
+    }
+
+    if (!mcpResult || mcpResult.success !== true) {
+      const errorMessage = mcpResult && mcpResult.result && mcpResult.result.error
+        ? mcpResult.result.error
+        : 'Command failed';
+      throw new Error(errorMessage);
+    }
 
     ws.send(JSON.stringify({
       type: 'command-complete',

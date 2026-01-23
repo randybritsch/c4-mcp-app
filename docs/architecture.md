@@ -2,7 +2,7 @@
 
 **Project:** C4-MCP-App  
 **Version:** 1.0.0  
-**Last Updated:** January 19, 2026
+**Last Updated:** January 23, 2026
 
 > [← Back to Project Overview](project_overview.md)
 
@@ -45,9 +45,9 @@
                  │                    │                    │
                  │                    │                    │
     ┌────────────▼──────────┐  ┌──────▼────────┐  ┌───────▼────────┐
-    │  Cloud STT Service    │  │  Cloud LLM    │  │   MCP Server   │
-    │  (Google/Azure)       │  │  (OpenAI/     │  │   (Control4    │
-    │                       │  │   Anthropic)  │  │    Bridge)     │
+     │  Cloud STT Service    │  │  Cloud LLM    │  │   MCP Server   │
+     │  (Google/Azure)       │  │  (OpenAI)     │  │   (`c4-mcp`)   │
+     │                       │  │              │  │    Bridge)     │
     └───────────────────────┘  └───────────────┘  └───────┬────────┘
                                                            │
                                                            │
@@ -61,8 +61,8 @@
 
 - **Mobile User:** Homeowner or family member accessing system via smartphone/tablet
 - **Cloud STT Service:** Third-party speech-to-text API (Google, Azure, AWS)
-- **Cloud LLM Service:** Large Language Model API (OpenAI GPT-4, Anthropic Claude)
-- **MCP Server:** Existing Model Context Protocol server that controls Control4
+- **Cloud LLM Service:** Large Language Model API (OpenAI; tested with `gpt-4o-mini`)
+- **MCP Server:** `c4-mcp` HTTP server that controls Control4
 - **Control4 System:** Home automation hardware (lights, HVAC, locks, AV equipment)
 
 ### System Boundary
@@ -107,7 +107,7 @@ External dependencies are accessed via APIs but not controlled by this system.
 │  │  ┌──────────────────────────────────────────────────────┐ │  │
 │  │  │              API Layer (Express/Fastify)             │ │  │
 │  │  │  ┌──────────────┐  ┌──────────────┐  ┌────────────┐ │ │  │
-│  │  │  │ /api/voice   │  │ /api/chat    │  │ /api/ws    │ │ │  │
+│  │  │  │ /api/v1/voice/process │  │ /api/v1/voice/process-text │  │ /ws │ │ │  │
 │  │  │  └──────┬───────┘  └──────┬───────┘  └─────┬──────┘ │ │  │
 │  │  └─────────┼─────────────────┼─────────────────┼────────┘ │  │
 │  │            │                 │                 │          │  │
@@ -143,11 +143,11 @@ External dependencies are accessed via APIs but not controlled by this system.
 | **UI Layer** | User interface rendering, event handling | HTML5, CSS3, Vanilla JS |
 | **Audio Recorder** | Capture voice input via MediaRecorder API | Web Audio API, MediaRecorder |
 | **WebSocket Client** | Maintain persistent connection for streaming | WebSocket API |
-| **API Client** | HTTP requests to backend (voice, chat, status) | Fetch API |
-| **API Layer** | REST endpoints, request routing, validation | Express.js or Fastify |
+| **API Client** | HTTP requests to backend (auth + process endpoints) | Fetch API |
+| **API Layer** | REST endpoints, request routing, validation | Express.js |
 | **STT Service** | Convert audio to text via cloud API | Google Speech-to-Text SDK |
-| **LLM Service** | Parse intent from text via cloud LLM | OpenAI SDK or Anthropic SDK |
-| **MCP Client** | Translate intent to MCP commands | MCP SDK |
+| **LLM Service** | Parse intent from text via cloud LLM | OpenAI SDK |
+| **MCP Client** | Translate intent to `c4-mcp` tool calls | HTTP client |
 | **Auth Manager** | Validate tokens, manage sessions | JWT library |
 | **Logger** | Structured logging to file/console | Winston or Pino |
 | **Config Manager** | Load environment variables, settings | dotenv |
@@ -179,8 +179,8 @@ External dependencies are accessed via APIs but not controlled by this system.
 ┌─────────────────┐
 │ PWA: API Client │
 └────┬────────────┘
-     │ 4. POST /api/v1/voice
-     │    { audio: base64, format: "webm", device_id: "..." }
+     │ 4. POST /api/v1/voice/process
+     │    { audioData: base64, format: "webm" }
      ▼
 ┌─────────────────────────────┐
 │ Backend: API Layer          │
@@ -217,12 +217,11 @@ External dependencies are accessed via APIs but not controlled by this system.
 ┌─────────────────────────────┐
 │ Backend: MCP Client         │
 └────┬────────────────────────┘
-     │ 11. Translate to MCP command
-     │     { type: "command", target: "device_12345",
-     │       action: "set_state", params: {...} }
+     │ 11. Translate to c4-mcp tool call
+     │     { kind: "tool", name: "c4_*", args: { ... } }
      ▼
 ┌─────────────────────────────┐
-│ MCP Server                  │
+│ c4-mcp HTTP Server          │
 └────┬────────────────────────┘
      │ 12. Execute on Control4 hardware
      ▼
@@ -287,12 +286,12 @@ Text commands follow the same flow but skip steps 2-3 (audio recording) and step
 │  │  │  │  - Port 443 (HTTPS)                            │ │ │ │
 │  │  │  │  - Let's Encrypt SSL Cert                      │ │ │ │
 │  │  │  │  - Route: / → Web Station                      │ │ │ │
-│  │  │  │  - Route: /api/* → Backend :3001               │ │ │ │
+│  │  │  │  - Route: /api/* → Backend :3002               │ │ │ │
 │  │  │  └───────────┬────────────────────┬───────────────┘ │ │ │
 │  │  │              │                    │                 │ │ │
 │  │  │  ┌───────────▼───────┐  ┌─────────▼──────────────┐ │ │ │
-│  │  │  │  Web Station      │  │  Backend Service       │ │ │ │
-│  │  │  │  (Port 80)        │  │  (Node.js on :3001)    │ │ │ │
+│  │  │  │  Static Hosting   │  │  Backend Service       │ │ │ │
+│  │  │  │  (optional)       │  │  (Node.js on :3002)    │ │ │ │
 │  │  │  │  ┌─────────────┐  │  │  ┌──────────────────┐  │ │ │ │
 │  │  │  │  │ PWA Frontend│  │  │  │  server.js       │  │ │ │ │
 │  │  │  │  │ (Static     │  │  │  │  - Express       │  │ │ │ │
@@ -301,9 +300,10 @@ Text commands follow the same flow but skip steps 2-3 (audio recording) and step
 │  │  │  └───────────────────┘  │  └──────────────────┘  │ │ │ │
 │  │  │                         │                         │ │ │ │
 │  │  │                         │  ┌──────────────────┐  │ │ │ │
-│  │  │                         │  │ Task Scheduler   │  │ │ │ │
-│  │  │                         │  │ (Starts backend  │  │ │ │ │
-│  │  │                         │  │  on boot)        │  │ │ │ │
+│  │  │                         │  │ Container Manager│  │ │ │ │
+│  │  │                         │  │ (Compose project)│  │ │ │ │
+│  │  │                         │  │ - backend :3002  │  │ │ │ │
+│  │  │                         │  │ - c4-mcp :3333   │  │ │ │ │
 │  │  │                         │  └──────────────────┘  │ │ │ │
 │  │  └─────────────────────────────────────────────────┘ │ │ │
 │  │                                                        │ │ │
@@ -314,8 +314,10 @@ Text commands follow the same flow but skip steps 2-3 (audio recording) and step
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
 │  ┌────────────────────────────────────────────────────────┐ │
-│  │           MCP Server (Separate Device/Process)         │ │
-│  │           (IP: 192.168.1.200 or localhost)             │ │
+│  │  Control4 bridge: `c4-mcp` HTTP server                 │ │
+│  │  - Backend talks to it via `C4_MCP_BASE_URL`            │ │
+│  │  - In Compose: `http://c4-mcp:3333`                     │ │
+│  │  - On LAN: publish host port as needed (often :3334)    │ │
 │  └────────────────────────────────────────────────────────┘ │
 │                                                              │
 └──────────────────────────────────────────────────────────────┘
@@ -342,26 +344,25 @@ Text commands follow the same flow but skip steps 2-3 (audio recording) and step
 - **DNS:** Public domain (e.g., `home.yourdomain.com`) pointing to home IP or Synology QuickConnect
 - **Ports:**
   - External: 443 (HTTPS) → forwarded to Synology
-  - Internal: 80 (Web Station), 3001 (Backend), MCP Server port (TBD)
-- **Process Management:** Synology Task Scheduler (boot-up script)
+     - Internal: 80 (optional static hosting), 3002 (Backend), 3334 (`c4-mcp`)
+- **Process Management:** Container Manager (project auto-start + restart policy)
 - **Persistence:** Backend runs as long-lived process; auto-restart on crash via watchdog script (optional)
 
 ---
 
 ## 5. Architecture Tradeoffs {#tradeoffs}
 
-### 5.1 No Docker/Containers
+### 5.1 Containerized Deployment (Compose)
 
-**Decision:** Use native Synology DSM tools instead of Docker.
+**Decision:** Use Synology Container Manager (Docker Compose) as the reference deployment.
 
 | Pros | Cons |
 |------|------|
-| Lower resource overhead (critical for DS218+) | No containerized isolation |
-| Simpler deployment (no Docker daemon) | Manual dependency management |
-| More stable on low-power hardware | Harder to replicate dev environment |
-| Native Synology integration | Less portable to other platforms |
+| Repeatable builds + clear dependency boundaries | Requires Container Manager |
+| Easy rebuild/recreate for code updates | Slight container overhead |
+| Cleaner ops story (ports, env vars, logs) | Need to manage volumes/env carefully |
 
-**Mitigation:** Use `package.json`/`requirements.txt` for reproducible dependencies; document exact Node.js/Python versions.
+**Mitigation:** Keep images small; document ports/env vars; use health checks and rebuild/recreate workflow.
 
 ---
 

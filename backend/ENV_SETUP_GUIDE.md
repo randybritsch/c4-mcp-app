@@ -116,11 +116,12 @@ AZURE_STT_REGION=<YOUR-REGION>  # e.g., eastus, westus2, westeurope
 
 ### 5. LLM (Intent Parsing) Configuration
 
-#### Option A: OpenAI GPT-4 (Recommended)
+#### Option A: OpenAI (Recommended)
 
 ```bash
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-proj-<YOUR-OPENAI-API-KEY>
+OPENAI_MODEL=gpt-4o-mini
 ```
 
 **How to get OpenAI API Key:**
@@ -131,49 +132,31 @@ OPENAI_API_KEY=sk-proj-<YOUR-OPENAI-API-KEY>
 5. Copy the key (starts with `sk-proj-` or `sk-`)
 6. **Set usage limits** in your OpenAI account to avoid unexpected charges
 
-**Pricing (as of 2026 - GPT-4 Turbo):**
-- Input: ~$0.01 per 1K tokens
-- Output: ~$0.03 per 1K tokens
-- Typical usage: ~50 input tokens + 50 output tokens = ~$0.002 per command
+**Pricing:** OpenAI pricing varies by model and changes frequently; `gpt-4o-mini` is typically much cheaper than larger GPT-4-class models.
 
-#### Option B: Anthropic Claude
+#### Option B: Anthropic Claude (Not Implemented)
 
 ```bash
 LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-<YOUR-ANTHROPIC-API-KEY>
 ```
 
-**How to get Anthropic API Key:**
-1. Go to [Anthropic Console](https://console.anthropic.com/)
-2. Sign up or log in
-3. Go to "API Keys" section
-4. Create new API key
-5. Copy the key (starts with `sk-ant-`)
-
-**Pricing (as of 2026 - Claude 3 Haiku):**
-- Input: ~$0.00025 per 1K tokens
-- Output: ~$0.00125 per 1K tokens
-- Typical usage: ~50 input tokens + 50 output tokens = ~$0.00009 per command
+Note: The current backend implementation throws `Anthropic LLM not yet implemented` when `LLM_PROVIDER=anthropic`.
 
 ---
 
-### 6. Control4 MCP Configuration
+### 6. Control4 MCP Configuration (c4-mcp HTTP server)
+
+This backend talks to the `c4-mcp` HTTP server (not directly to Control4 Director).
 
 ```bash
-MCP_HOST=192.168.1.100  # Replace with your Control4 Director IP
-MCP_PORT=9000           # Default MCP port (verify with your Control4 system)
+# Example (Synology Container Manager / Compose): backend -> c4-mcp via service DNS
+C4_MCP_BASE_URL=http://c4-mcp:3333
+C4_MCP_TIMEOUT_MS=8000
 ```
 
-**How to find your Control4 Director IP:**
-1. Open Control4 Composer software
-2. Go to "System Design" → "Properties"
-3. Note the Director IP address
-4. **OR** Check your router's DHCP client list for "Control4-Director" or similar
-
-**Note:** MCP protocol implementation is a placeholder. You'll need to:
-1. Verify the actual Control4 MCP protocol specification
-2. Update `backend/src/services/mcp-client.js` with real protocol
-3. Test with your actual Control4 system
+**Notes:**
+- From outside Docker (e.g., curl from your laptop), `c4-mcp` is typically exposed on `http://<NAS_IP>:3334` (host port mapping).
 
 ---
 
@@ -197,10 +180,11 @@ GOOGLE_STT_API_KEY=AIzaSyC1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6m
 # LLM Intent Parsing (choose one)
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890
+OPENAI_MODEL=gpt-4o-mini
 
-# Control4 MCP
-MCP_HOST=192.168.1.100
-MCP_PORT=9000
+# Control4 MCP (c4-mcp HTTP server)
+C4_MCP_BASE_URL=http://c4-mcp:3333
+C4_MCP_TIMEOUT_MS=8000
 ```
 
 ---
@@ -274,11 +258,9 @@ Based on **100 voice commands per day** (3000/month):
 |---------|----------|--------------|---------------|
 | STT | Google | $0.0016 | ~$4.80 |
 | STT | Azure | $0.0011 | ~$3.30 |
-| LLM | OpenAI GPT-4 | $0.0020 | ~$6.00 |
-| LLM | Anthropic Claude | $0.0001 | ~$0.30 |
+| LLM | OpenAI (`gpt-4o-mini`) | varies | varies |
 
-**Recommended combination:** Google STT + Anthropic Claude = **~$5.10/month**  
-**Alternative:** Azure STT + Anthropic Claude = **~$3.60/month** (most cost-effective)
+**Recommended combination:** Google STT + OpenAI (`gpt-4o-mini`) (balance of quality/cost)
 
 ---
 
@@ -291,10 +273,10 @@ Based on **100 voice commands per day** (3000/month):
 - Try regenerating the key
 
 ### "MCP connection timeout"
-- Verify Control4 Director IP is correct
-- Check Director is powered on and network-accessible
-- Verify port 9000 is not blocked by firewall
-- Test with `telnet 192.168.1.100 9000` from Synology
+- Verify `c4-mcp` is reachable from the backend container.
+- Check backend -> c4-mcp health: `GET http://<NAS_IP>:3002/api/v1/health/mcp`
+- Check c4-mcp directly (host/LAN): `GET http://<NAS_IP>:3334/mcp/list`
+- In Compose, prefer `C4_MCP_BASE_URL=http://c4-mcp:3333`.
 
 ### "Permission denied" on Synology
 - Verify `.env` file permissions: `chmod 600 .env`

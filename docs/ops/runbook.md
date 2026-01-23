@@ -2,7 +2,7 @@
 
 **Project:** C4-MCP-App  
 **Version:** 1.0.0  
-**Last Updated:** January 19, 2026
+**Last Updated:** January 23, 2026
 
 > [← Back to Project Overview](../project_overview.md)
 
@@ -27,16 +27,15 @@
 
 | Environment | Purpose | URL | Access |
 |-------------|---------|-----|--------|
-| **Development** | Local laptop dev | `http://localhost:3001` | Developers only |
-| **Staging** | Pre-production testing | `https://staging.home.local` | Internal network |
-| **Production** | Live system | `https://home.yourdomain.com` | Home users |
+| **Development** | Local laptop dev | `http://localhost:3000` | Developers only |
+| **Production (LAN)** | Synology DS218+ | `http://<NAS_IP>:3002` | Internal network |
 
 ### 1.2 Environment Configuration
 
 #### Development
 
 - **Location:** Developer's laptop
-- **Backend:** Node.js v18+ running locally (port 3001)
+- **Backend:** Node.js v22 running locally (port 3000)
 - **PWA:** Served via local web server (e.g., `python -m http.server`)
 - **MCP Server:** Mock or test instance
 - **Cloud APIs:** Dev/test API keys
@@ -46,7 +45,7 @@
 #### Staging
 
 - **Location:** Synology DS218+ (test partition or subdomain)
-- **Backend:** Running on DS218+ (port 3001)
+- **Backend:** Running on DS218+ (port 3002)
 - **PWA:** Served via Web Station (subdomain `staging.home.local`)
 - **MCP Server:** Test MCP server or production with read-only access
 - **Cloud APIs:** Dev/test API keys
@@ -56,9 +55,9 @@
 #### Production
 
 - **Location:** Synology DS218+ (primary)
-- **Backend:** Node.js v22 running on DS218+ (port 3001)
-- **PWA:** Served via Web Station (`home.yourdomain.com`)
-- **MCP Server:** Production MCP server
+- **Backend:** Node.js backend in Synology Container Manager (host port typically `3002`)
+- **PWA:** Typically served locally (for mic permissions) or via Web Station/static hosting
+- **MCP Server:** `c4-mcp` HTTP server (host port typically `3334`)
 - **Cloud APIs:** Production API keys
 - **Logs:** `/var/log/c4-mcp-app.log`
 - **SSL:** Let's Encrypt (auto-renewed)
@@ -75,7 +74,7 @@ See [Backend Service Module - Configuration](../modules/backend-service.md#confi
 | `LOG_LEVEL` | `DEBUG` | `INFO` | `INFO` |
 | `STT_API_KEY` | Test key | Test key | Prod key |
 | `LLM_API_KEY` | Test key | Test key | Prod key |
-| `MCP_SERVER_URL` | Mock server | Test server | Prod server |
+| `C4_MCP_BASE_URL` | `http://127.0.0.1:3333` | n/a | `http://<NAS_IP>:3334` |
 
 ---
 
@@ -91,6 +90,27 @@ See [Backend Service Module - Configuration](../modules/backend-service.md#confi
 - [ ] Communicate deployment to users (if downtime expected)
 
 ### 2.2 Deployment Steps (Production)
+
+#### Option A (Recommended): Synology Container Manager (Compose Project)
+
+Reference layout on NAS:
+
+- Compose project folder: `/dockerc4-mcp/c4-voice/`
+- Compose file: `/dockerc4-mcp/c4-voice/compose.yaml`
+
+Typical workflow:
+
+1) Update source/config in the project folder (or sync from your dev machine).
+2) In **Container Manager → Projects**, open the project and use **Build / Rebuild** (or “Recreate”) for the backend service.
+3) Verify:
+  - Backend health: `GET http://<NAS_IP>:3002/api/v1/health`
+  - MCP health: `GET http://<NAS_IP>:3002/api/v1/health/mcp`
+  - c4-mcp tools: `GET http://<NAS_IP>:3334/mcp/list`
+
+Notes:
+
+- If the backend container is built from a Docker image, a simple restart may not pick up code changes. Prefer **rebuild + recreate**.
+- For write tools, ensure the `c4-mcp` container has `C4_WRITES_ENABLED=true` (guardrails can still remain enabled).
 
 #### Step 1: Backup Current Version
 
@@ -173,7 +193,7 @@ cd /volume1/apps/c4-mcp-app
 ps aux | grep "node src/server.js"
 
 # Check health endpoint
-curl http://localhost:3001/api/v1/health
+curl http://localhost:3002/api/v1/health
 # Expected: {"status":"ok",...}
 
 # Check logs
@@ -189,7 +209,7 @@ tail -f /var/log/c4-mcp-app.log
 - Watch logs for errors
 - Test voice and text commands
 - Monitor memory usage: `ps aux | grep node`
-- Check WebSocket connections: `netstat -an | grep 3001`
+- Check WebSocket connections: `netstat -an | grep 3002`
 
 #### Step 10: Cleanup Old Versions (After 24 Hours)
 
@@ -247,7 +267,7 @@ sleep 5
 
 # Step 7: Verify
 echo "[7/9] Verifying deployment..."
-HEALTH=$(curl -s http://$NAS_IP:3001/api/v1/health | jq -r '.status')
+HEALTH=$(curl -s http://$NAS_IP:3002/api/v1/health | jq -r '.status')
 if [ "$HEALTH" != "ok" ]; then
   echo "ERROR: Health check failed! Rolling back..."
   ssh admin@$NAS_IP "cd /volume1/apps/c4-mcp-app && pkill -9 -f 'node src/server.js' && mv backend backend-failed && mv backend-old backend && ./scripts/start-backend.sh"
@@ -258,7 +278,7 @@ echo "[8/9] Deployment successful!"
 echo "[9/9] Monitoring for 60 seconds..."
 for i in {1..12}; do
   sleep 5
-  HEALTH=$(curl -s http://$NAS_IP:3001/api/v1/health | jq -r '.status')
+  HEALTH=$(curl -s http://$NAS_IP:3002/api/v1/health | jq -r '.status')
   echo "  Health check $i/12: $HEALTH"
 done
 
@@ -299,7 +319,7 @@ mv backend-old backend
 ./scripts/start-backend.sh
 
 # Verify
-curl http://localhost:3001/api/v1/health
+curl http://localhost:3002/api/v1/health
 ```
 
 **Time:** ~30 seconds
@@ -321,7 +341,7 @@ tar -xzf $LATEST_BACKUP
 ./scripts/start-backend.sh
 
 # Verify
-curl http://localhost:3001/api/v1/health
+curl http://localhost:3002/api/v1/health
 ```
 
 **Time:** ~2 minutes
@@ -355,7 +375,7 @@ curl http://localhost:3001/api/v1/health
 
 ```bash
 #!/bin/bash
-HEALTH_URL="http://localhost:3001/api/v1/health"
+HEALTH_URL="http://localhost:3002/api/v1/health"
 RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL)
 
 if [ "$RESPONSE" -eq 200 ]; then
@@ -516,7 +536,7 @@ curl -X POST "https://api.twilio.com/2010-04-01/Accounts/$TWILIO_SID/Messages.js
 tail -50 /var/log/c4-mcp-app.log
 
 # Check port availability
-netstat -tuln | grep 3001
+netstat -tuln | grep 3002
 
 # Check Node.js installation
 which node
@@ -597,7 +617,7 @@ kill -USR2 <PID>  # Triggers heap dump
 
 ```bash
 # Check WebSocket connections
-netstat -an | grep 3001 | grep ESTABLISHED
+netstat -an | grep 3002 | grep ESTABLISHED
 
 # Check reverse proxy logs
 cat /var/log/nginx/access.log | grep "ws"
@@ -642,7 +662,7 @@ ping 192.168.1.200
 - **Logs:** Primary source of truth (`/var/log/c4-mcp-app.log`)
 - **Health Endpoint:** Quick status check (`/api/v1/health`)
 - **Process Monitor:** `ps aux | grep node`
-- **Network Monitor:** `netstat -an | grep 3001`
+- **Network Monitor:** `netstat -an | grep 3002`
 - **Browser DevTools:** Inspect PWA errors, network requests, WebSocket messages
 
 ---
@@ -652,7 +672,7 @@ ping 192.168.1.200
 ### 7.1 Daily Tasks
 
 - [ ] Check logs for errors: `grep ERROR /var/log/c4-mcp-app.log`
-- [ ] Verify health check: `curl http://localhost:3001/api/v1/health`
+- [ ] Verify health check: `curl http://localhost:3002/api/v1/health`
 
 ### 7.2 Weekly Tasks
 

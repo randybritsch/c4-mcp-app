@@ -1,120 +1,70 @@
-# PROJECT BOOTSTRAP SUMMARY
 
-**Last Updated:** January 20, 2026  
-**Status:** ✅ DEPLOYED - Production Running
+# PROJECT BOOTSTRAP SUMMARY — c4-mcp-app
 
----
+**Last Updated:** January 23, 2026
 
-## Purpose
+**1) One-line purpose**
+Provide a lightweight **voice + text UI** for Control4: the backend turns natural language into deterministic `c4-mcp` tool calls and streams results to a browser UI over WebSocket.
 
-Voice-controlled smart home interface for Control4 automation via Progressive Web App, running on Synology DS218+ NAS without Docker.
+**2) Architecture overview (3–6 bullets)**
+- **Frontend**: PWA static app (`frontend/`) captures audio/text and displays streaming progress.
+- **Backend**: Node.js (Express) REST API + WebSocket server (reference NAS host port: `:3002`).
+- **Cloud AI**: STT (Google/Azure) + OpenAI for intent parsing (default model `gpt-4o-mini`).
+- **Control4 bridge**: separate `c4-mcp` HTTP server (reference NAS host port: `:3334`, container `:3333`).
+- **Decoupled integration**: backend reaches `c4-mcp` only via `C4_MCP_BASE_URL` (no shared code between repos).
+- **Disambiguation UX**: ambiguous targets emit `clarification-required` → UI prompts → UI sends `clarification-choice` → backend retries.
 
----
+**3) Key modules and roles (bullet list)**
+- `backend/src/server.js`: server entrypoint.
+- `backend/src/app.js`: Express app wiring + middleware.
+- `backend/src/routes/*`: REST endpoints (`health`, `auth`, `voice`).
+- `backend/src/websocket.js`: WebSocket protocol (audio streaming, status events, clarification state).
+- `backend/src/services/stt.js`: speech-to-text provider integration.
+- `backend/src/services/llm.js`: intent parsing (structured `{ tool, args }`).
+- `backend/src/services/mcp-client.js`: calls `c4-mcp` (`/mcp/list`, `/mcp/call`) and handles ambiguity.
+- `frontend/js/*`: UI logic + WebSocket client + config.
 
-## Architecture Overview
+**4) Data & contracts (top 3–5 only)**
+- Voice request: `{ audioData: "<base64>", format?: "webm" }`.
+- Plan: `{ tool: string, args: object }` (LLM output contract).
+- MCP tool call: `{ kind:"tool", name:"<tool>", args:{...} }`.
+- Clarification flow: `clarification-required` → `clarification-choice` (index-based selection).
+- Auth: JWT `Authorization: Bearer <token>` for protected routes and `/ws?token=...`.
 
-- **Frontend:** PWA deployed at http://192.168.1.237 via Web Station (HTML5/CSS3/JS + MediaRecorder API + WebSocket + Service Workers)
-- **Backend:** Node.js v22 Express service running at http://192.168.1.237:3001 (<65MB RAM, auto-starts via Task Scheduler)
-- **Cloud AI:** Google/Azure STT for speech-to-text, OpenAI GPT-4/Anthropic Claude for intent parsing (APIs configured, keys pending)
-- **Control4 Bridge:** MCP client configured for Director at 192.168.1.142:9000 (protocol implementation pending)
-- **Deployment:** Synology-native tools—Web Station (PWA), Task Scheduler (backend auto-start), nginx (reverse proxy)
-- **Production Ready:** Backend responding to health checks, frontend accessible, all infrastructure configured
+**5) APIs (key endpoints only)**
+- `GET /api/v1/health`
+- `GET /api/v1/health/mcp`
+- `POST /api/v1/auth/token`
+- `POST /api/v1/voice/process`
+- `POST /api/v1/voice/process-text`
+- WebSocket: `/ws?token=...`
 
----
+**6) Coding conventions (AI must always follow)**
+- Use environment-driven config (`backend/src/config/index.js`); do not hardcode NAS IPs.
+- Keep logs structured with correlation IDs; avoid logging secrets.
+- Prefer `async/await` with explicit error mapping (consistent error codes + HTTP status).
+- Keep the backend↔MCP contract stable (MCP payload shape and clarification schema).
+- Maintain Jest tests and ESLint as regression gates.
 
-## Key Modules & Roles
+**7) Current priorities (Top 5)**
+1. Keep deployment unambiguous (avoid mixed old/new backend ports; validate `:3002` is the active build).
+2. Ensure `C4_MCP_BASE_URL` is correct in container/LAN scenarios (`http://c4-mcp:3333` inside compose).
+3. Validate WebSocket + clarification flows end-to-end in production.
+4. Confirm write posture: `c4-mcp` writes enabled only when intended and guardrails enforced.
+5. Stabilize key management (STT/OpenAI env vars; no secrets in repo).
 
-- **PWA Frontend** (`/frontend`): MediaRecorder voice capture, WebSocket streaming, Service Worker offline support, responsive UI
-- **Backend Service** (`/backend/src`): Express REST API, WebSocket server, JWT auth, Winston logging, correlation middleware
-- **STT Service** (`/backend/src/services/stt.js`): Google/Azure API integration, audio format validation, retry logic
-- **LLM Service** (`/backend/src/services/llm.js`): OpenAI/Anthropic intent parsing, structured JSON output, prompt engineering
-- **MCP Client** (`/backend/src/services/mcp.js`): Control4 Director communication (placeholder - protocol needs implementation)
-- **Health Check** (`/backend/src/routes/health.js`): System status monitoring, uptime tracking, memory metrics
+**8) Open risks/unknowns (Top 5)**
+1. External API cost/quotas (STT + OpenAI).
+2. Browser audio codec variability (MediaRecorder formats differ).
+3. WebSocket stability (mobile roaming, proxy timeouts, reverse-proxy config).
+4. Ambiguity frequency in real homes (common room/device names).
+5. Safety risk if ports are exposed beyond LAN (prefer firewall/VPN; never public internet by default).
 
----
-
-## Data & Contracts (Top 5)
-
-1. **Voice Request:** `{ audioChunks: [Blob], timestamp: ISO8601, sessionId: UUID }`
-2. **STT Response:** `{ transcript: string, confidence: 0.0-1.0 }`
-3. **Intent Object:** `{ action: string, target: string, value?: any, room?: string }`
-4. **MCP Command:** `{ command: string, deviceId: string, parameters: {}, timestamp: ISO8601 }`
-5. **Health Status:** `{ status: "healthy", timestamp: ISO8601, uptime: seconds, memoryUsage: {}, nodeVersion: string }`
-
----
-
-## APIs (Key Endpoints)
-
-- **Health:** `GET http://192.168.1.237:3001/api/v1/health` (✅ responding)
-- **Voice:** `POST /api/v1/voice` (audio processing endpoint)
-- **WebSocket:** `ws://192.168.1.237:3001/ws` (real-time streaming)
-- **Auth:** `POST /api/v1/auth/register`, `POST /api/v1/auth/token`
-- **Rate Limits:** 100 req/15min per IP (REST), 10 concurrent WebSocket connections, 30s heartbeat
-
----
-
-## Coding Conventions (AI Must Follow)
-
-- **Node.js:** v22 in production, code compatible with v18+, **pure JavaScript only—NO native addons**
-- **Config:** Environment-based via `/backend/src/config/index.js`, reads from `.env` with dotenv
-- **Async:** Always `async/await`, structured error handling with try-catch
-- **Errors:** Winston JSON logging with correlation IDs, levels: `error|warn|info|debug`
-- **Testing:** Jest + Supertest, 6/6 tests passing, mock external APIs
-- **Security:** Helmet, CORS, rate limiting, JWT with 7-day expiry, no secrets in code
-- **Deployment:** Task Scheduler for auto-start, health checks for monitoring, logs in `/tmp/c4-mcp-app-logs/`
-
----
-
-## Current Priorities (Top 5)
-
-1. **Acquire API Keys:** Google Cloud STT API key, OpenAI API key (see [API_KEYS.md](../API_KEYS.md))
-2. **Test Voice Pipeline:** Record audio in PWA → verify STT transcription → confirm LLM intent parsing
-3. **Implement Control4 Protocol:** Research MCP protocol documentation, implement real Control4 integration (current: placeholder)
-4. **SSL Certificate:** Configure Let's Encrypt via DSM for HTTPS/WSS access
-5. **Mobile Testing:** Test PWA installation, offline functionality, WebSocket reconnection on various devices
-
----
-
-## Open Risks/Unknowns (Top 5)
-
-1. **Control4 MCP Protocol:** Current implementation is placeholder - requires official Control4 protocol documentation and DriverWorks SDK access
-2. **API Costs:** Google STT (~$0.024/min) + OpenAI GPT-4 (~$0.03/1K tokens) = ~$0.01-0.05 per command; need usage monitoring and limits
-3. **NAS Performance:** Backend using ~65MB RAM (✅ within budget), but no load testing with concurrent users yet
-4. **Network Reliability:** WebSocket reconnection logic untested, NAT traversal may cause dropouts in some router configurations
-5. **Audio Compatibility:** Browser MediaRecorder codec support varies (WebM Opus vs AAC); cloud STT compatibility needs validation
-
----
-
-## Full Documentation Links
-
-- **Project Overview:** [docs/project_overview.md](project_overview.md) (762 lines, ✅ updated 2026-01-20)
-- **Deployment Guide:** [DEPLOYMENT_COMPLETE.md](../DEPLOYMENT_COMPLETE.md) (full setup summary)
-- **Task Scheduler Setup:** [TASK_SCHEDULER_SETUP.md](../TASK_SCHEDULER_SETUP.md) (auto-start configuration)
-- **API Keys Guide:** [API_KEYS.md](../API_KEYS.md) (Google/OpenAI/Control4 setup)
-- **Architecture:** [docs/architecture.md](architecture.md)
-- **API Reference:** [docs/api/endpoints.md](api/endpoints.md)
-- **Operations:** [docs/ops/runbook.md](ops/runbook.md)
-- **GitHub Repository:** https://github.com/randybritsch/c4-mcp-app
-
----
-
-## Quick Status Check
-
-```bash
-# Backend health
-curl http://192.168.1.237:3001/api/v1/health
-
-# Frontend
-http://192.168.1.237
-
-# Server logs
-ssh randybritsch@192.168.1.237 "tail -f /tmp/c4-mcp-app-logs/backend.log"
-
-# Process status
-ssh randybritsch@192.168.1.237 "ps aux | grep 'node src/server.js'"
-```
-
----
-
-**Word Count:** ~650 words  
-**Use Case:** Paste this summary into new chat sessions to instantly restore project context with current deployment status.
+**9) Links/paths to full docs**
+- `docs/project_overview.md`
+- `docs/architecture.md`
+- `docs/api/endpoints.md`
+- `docs/ops/runbook.md`
+- `docs/conventions_guardrails.md`
+- `compose.nas.yaml`
+- `README.md` (repo root)

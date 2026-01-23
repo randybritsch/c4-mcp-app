@@ -1,0 +1,41 @@
+# NAS stack: c4-mcp (Python) + c4-mcp-app backend (Node)
+# Import into Synology Container Manager as a Project.
+
+name: c4-voice
+
+services:
+  c4-mcp:
+    build:
+      context: ./nas/c4-mcp
+    environment:
+      - C4_BIND_HOST=0.0.0.0
+      - C4_PORT=3333
+      - C4_CONFIG_PATH=/config/config.json
+      - C4_WRITE_GUARDRAILS=true
+      - C4_WRITES_ENABLED=true
+    volumes:
+      - ./nas/c4-mcp/config:/config:ro
+      - ./nas/c4-mcp/logs:/app/logs
+    ports:
+      - "3334:3333"
+    restart: unless-stopped
+
+  backend:
+    build:
+      context: ./backend
+    depends_on:
+      - c4-mcp
+    environment:
+      - NODE_ENV=production
+      - HOST=0.0.0.0
+      - PORT=3000
+      # Point at c4-mcp via the compose network (no hardcoded NAS IP)
+      - C4_MCP_BASE_URL=http://c4-mcp:3333
+      - C4_MCP_TIMEOUT_MS=8000
+      # Add tools here if needed (comma-separated)
+      # - MCP_TOOL_ALLOWLIST=c4_list_rooms,c4_room_lights_set
+    env_file:
+      - ./nas/backend/.env
+    ports:
+      - "3002:3000"
+    restart: unless-stopped

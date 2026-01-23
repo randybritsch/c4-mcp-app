@@ -252,11 +252,11 @@ async function parseIntent(transcript) {
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.LLM_API_KEY}`,
+      'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'gpt-4',
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
       messages: [
         { role: 'system', content: 'Parse Control4 commands...' },
         { role: 'user', content: transcript }

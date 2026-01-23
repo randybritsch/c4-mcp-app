@@ -1,6 +1,6 @@
 # C4-MCP-App - Voice-Controlled Smart Home Interface
 
-Voice-controlled smart home interface for Control4 automation via Progressive Web App, running on Synology DS218+ NAS.
+Voice-controlled smart home interface for Control4 automation via a Progressive Web App (PWA) + Node.js backend, typically deployed on a Synology NAS and calling the `c4-mcp` HTTP server.
 
 ## Project Structure
 
@@ -53,8 +53,8 @@ c4-mcp-app/
 - **Node.js v22** (install via Synology Package Center)
 - **API Keys:**
   - Google Cloud STT API or Azure Speech Services
-  - OpenAI API or Anthropic API
-  - Control4 MCP credentials
+  - OpenAI API (tested with `gpt-4o-mini`)
+  - Control4 MCP (c4-mcp) configured and reachable
 
 ### Backend Setup
 
@@ -102,20 +102,29 @@ See detailed deployment instructions:
 - [Frontend Deployment](scripts/deploy-frontend.sh)
 - [Operational Runbook](docs/ops/runbook.md)
 
+Notes:
+
+- The current reference deployment uses **Synology Container Manager** with a Docker Compose project (see `compose.nas.yaml`).
+- The backend talks to `c4-mcp` as a separate HTTP service via `C4_MCP_BASE_URL` (no shared code required).
+- Typical LAN ports in this setup:
+  - Backend: `http://<NAS_IP>:3002`
+  - c4-mcp: `http://<NAS_IP>:3334`
+
 ## API Documentation
 
 - **REST API:** See [docs/api/endpoints.md](docs/api/endpoints.md)
-- **WebSocket:** Real-time streaming voice commands
-- **Authentication:** JWT tokens (7-day expiry)
+- **WebSocket:** Real-time streaming voice commands at `/ws?token=...`
+- **Authentication:** JWT tokens (set `JWT_EXPIRY=never` for non-expiring)
 
 ## Architecture
 
 - **Frontend:** PWA with MediaRecorder API for voice capture
 - **Backend:** Node.js Express service orchestrating:
   1. Speech-to-Text (Google/Azure)
-  2. Intent Parsing (OpenAI GPT-4/Anthropic Claude)
-  3. Command Execution (Control4 MCP)
-- **Deployment:** Synology-native (no Docker required)
+  2. Intent Parsing (OpenAI; tested with `gpt-4o-mini`)
+  3. Command Execution (Control4 MCP via `c4-mcp` HTTP)
+- **Disambiguation UX:** when Control4 name resolution is ambiguous (e.g., multiple “Basement” rooms), the UI prompts for a choice and retries deterministically.
+- **Deployment:** Synology Container Manager (Docker Compose) is the reference setup; native process deployment is also possible.
 
 ## Key Features
 
@@ -125,6 +134,7 @@ See detailed deployment instructions:
 ✅ JWT authentication  
 ✅ Structured logging with Winston  
 ✅ Comprehensive error handling  
+✅ Interactive disambiguation (“Which Basement?”)  
 ✅ Rate limiting and security  
 ✅ 80%+ test coverage  
 
@@ -154,6 +164,6 @@ Randy Britsch
 
 ---
 
-**Tech Stack:** Node.js v22, Express.js, WebSocket, PWA (HTML5/CSS3/JS), Google STT, OpenAI GPT-4, Control4 MCP  
+**Tech Stack:** Node.js v22, Express.js, WebSocket, PWA (HTML/CSS/JS), Google/Azure STT, OpenAI (`gpt-4o-mini`), Control4 MCP (`c4-mcp`)  
 **Platform:** Synology DS218+ (2GB RAM, dual-core Realtek RTD1296)  
-**Deployment:** Native Synology tools (Web Station, Task Scheduler, Reverse Proxy)
+**Deployment:** Synology Container Manager (Docker Compose). Native Synology tools (Web Station / Task Scheduler) are legacy.

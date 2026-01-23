@@ -1,5 +1,19 @@
 # Deployment Verification Checklist
 
+This checklist contains both the **current reference deployment** (Synology Container Manager / Compose) and **legacy** DSM-native steps (Web Station / Task Scheduler). Prefer Compose unless you have a specific reason not to.
+
+## Reference Deployment (Recommended): Synology Container Manager (Compose)
+
+- [ ] Backend reachable: `GET http://<NAS_IP>:3002/api/v1/health`
+- [ ] Backend → c4-mcp reachable: `GET http://<NAS_IP>:3002/api/v1/health/mcp`
+- [ ] c4-mcp reachable (host/LAN): `GET http://<NAS_IP>:3334/mcp/list`
+- [ ] Backend env configured:
+  - [ ] `OPENAI_API_KEY` set
+  - [ ] `OPENAI_MODEL=gpt-4o-mini`
+  - [ ] `STT_PROVIDER` + provider key(s) set
+  - [ ] `C4_MCP_BASE_URL=http://c4-mcp:3333` (recommended inside Compose)
+- [ ] c4-mcp write posture correct (if using write tools): `C4_WRITE_GUARDRAILS=true` and `C4_WRITES_ENABLED=true`
+
 ## Pre-Deployment Checklist
 
 ### 1. Icons Ready
@@ -12,8 +26,8 @@
 - [ ] Backend `.env` created from `.env.example`
 - [ ] JWT_SECRET generated (64+ character random string)
 - [ ] STT provider configured (Google or Azure with valid API key)
-- [ ] LLM provider configured (OpenAI or Anthropic with valid API key)
-- [ ] Control4 Director IP address set in MCP_HOST
+- [ ] LLM provider configured (OpenAI supported; Anthropic is not implemented)
+- [ ] c4-mcp endpoint set in C4_MCP_BASE_URL (Compose: `http://c4-mcp:3333`, host/LAN: `http://<NAS_IP>:3334`)
 - [ ] LOG_LEVEL set to `info` for production
 
 ### 3. Dependencies & Tests
@@ -27,6 +41,8 @@
 ## Backend Deployment
 
 ### On Synology DS218+
+
+Legacy section (non-container deployment):
 
 Run from your development machine (PowerShell):
 
@@ -58,7 +74,7 @@ Run from your development machine (PowerShell):
 - [ ] Verify startup logs (no errors, listening on port 3000)
 - [ ] Press `Ctrl+C` to stop
 
-### Task Scheduler Configuration
+### Task Scheduler Configuration (Legacy)
 
 - [ ] Open Synology DSM → Control Panel → Task Scheduler
 - [ ] Create → Triggered Task → User-defined script
@@ -93,15 +109,9 @@ Run from your development machine (PowerShell):
 
 **Manual steps after script completes:**
 
-- [ ] Update API URLs in `frontend/js/config.js`:
-  ```javascript
-  const API_URL = 'https://c4-voice.local/api/v1';  // Change to your domain
-  const WS_URL = 'wss://c4-voice.local/ws';         // Change to your domain
-  ```
-- [ ] Deploy updated config:
-  ```bash
-  scp frontend/js/config.js <user>@<synology>:/volume1/web/c4-voice/js/
-  ```
+- [ ] If serving the frontend from a different host than the backend, use runtime overrides instead of editing source:
+  - `?backend=http://<NAS_IP>:3002`
+  - or `?api=http://<NAS_IP>:3002&ws=ws://<NAS_IP>:3002/ws`
 
 ### Web Station Configuration
 
@@ -173,16 +183,27 @@ curl http://localhost:3000/api/v1/health
 **Expected response:**
 ```json
 {
-  "status": "ok",
+  "status": "healthy",
   "timestamp": "2026-01-19T...",
   "uptime": 123.45,
-  "memory": {...}
+  "memoryUsage": {...}
 }
 ```
 
 - [ ] Status is `"ok"`
 - [ ] Uptime is increasing (backend is running)
 - [ ] No errors in response
+
+### 1b. MCP Connectivity Check
+
+From Synology SSH or development machine:
+
+```bash
+curl http://localhost:3000/api/v1/health/mcp
+```
+
+- [ ] Status is `"healthy"`
+- [ ] `mcp.baseUrl` matches your `C4_MCP_BASE_URL`
 
 ### 2. HTTPS Health Check
 
@@ -337,7 +358,7 @@ grep -i "error\|timeout\|failed" /var/log/c4-mcp-app/backend.log | tail -20
 Monitor cloud provider dashboards:
 
 - [ ] Google Cloud Console → APIs & Services → Dashboard → Check STT usage
-- [ ] OpenAI/Anthropic Console → Usage → Check token consumption
+- [ ] OpenAI Console → Usage → Check token consumption
 - [ ] Set up billing alerts if usage exceeds expected amounts
 
 ---

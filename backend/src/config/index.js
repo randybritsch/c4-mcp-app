@@ -29,7 +29,7 @@ const config = {
     provider: process.env.LLM_PROVIDER || 'openai',
     openai: {
       apiKey: process.env.OPENAI_API_KEY,
-      model: process.env.OPENAI_MODEL || 'gpt-4',
+      model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     },
     anthropic: {
       apiKey: process.env.ANTHROPIC_API_KEY,
@@ -42,9 +42,9 @@ const config = {
     // This backend talks to the c4-mcp HTTP server (not directly to Director).
     // Example: http://192.168.1.50:3333 (NAS/LAN)
     mcpBaseUrl:
-      process.env.C4_MCP_BASE_URL ||
-      process.env.MCP_BASE_URL ||
-      'http://127.0.0.1:3333',
+      process.env.C4_MCP_BASE_URL
+      || process.env.MCP_BASE_URL
+      || 'http://127.0.0.1:3333',
     timeoutMs: parseInt(process.env.C4_MCP_TIMEOUT_MS, 10) || 8000,
 
     // Back-compat env vars (unused by default):

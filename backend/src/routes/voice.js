@@ -19,7 +19,7 @@ router.post('/process', authMiddleware, async (req, res, next) => {
       throw new AppError(
         ErrorCodes.MISSING_PARAMETER,
         'audioData is required',
-        400
+        400,
       );
     }
 
@@ -51,7 +51,7 @@ router.post('/process-text', authMiddleware, async (req, res, next) => {
       throw new AppError(
         ErrorCodes.MISSING_PARAMETER,
         'transcript is required',
-        400
+        400,
       );
     }
 

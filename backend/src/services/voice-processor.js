@@ -19,7 +19,7 @@ async function processVoiceCommand(audioData, format, correlationId) {
       throw new AppError(
         ErrorCodes.STT_ERROR,
         'No speech detected in audio',
-        400
+        400,
       );
     }
 

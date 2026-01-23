@@ -1,7 +1,7 @@
 # Project Overview Update Summary
 
-**Date:** January 19, 2026  
-**Session:** Complete Application Implementation
+**Date:** January 23, 2026  
+**Session:** NAS Deployment + Ambiguity Clarification Loop
 
 ---
 
@@ -18,9 +18,10 @@ Updated to reflect actual implementation:
 - ✅ Complete Express.js server with WebSocket support
 - ✅ JWT authentication system
 - ✅ STT integration (Google/Azure Speech-to-Text)
-- ✅ LLM integration (OpenAI GPT-4/Anthropic Claude)
+- ✅ LLM integration (OpenAI; tested with `gpt-4o-mini`)
 - ✅ MCP client for Control4 communication
 - ✅ Full voice processing pipeline (STT → LLM → MCP)
+- ✅ Ambiguity handling: detects MCP "ambiguous" results and triggers a UI-driven clarification loop
 - ✅ Winston logging with correlation IDs
 - ✅ Structured error handling
 - ✅ Jest testing (6 tests passing, 100% pass rate)
@@ -30,12 +31,13 @@ Updated to reflect actual implementation:
 - ✅ Progressive Web App with offline support
 - ✅ MediaRecorder API voice capture
 - ✅ WebSocket client with auto-reconnection
+- ✅ Clarification UI: renders candidate buttons and sends user selection back to retry deterministically
 - ✅ Service Worker caching
 - ✅ Modern dark theme UI
 - ✅ PWA manifest (icons need generation)
 
 **Infrastructure:**
-- ✅ Deployment scripts for Synology DS218+
+- ✅ Reference deployment via Synology Container Manager (Docker Compose project)
 - ✅ Health check automation
 - ✅ Complete documentation (10+ files)
 - ✅ Bootstrap summary and conventions guardrails
@@ -129,10 +131,9 @@ Updated to reflect actual implementation:
 
 1. Generate PWA icons (all required sizes)
 2. Configure backend .env with real API keys
-3. Test MCP connection with real Control4 system
-4. Deploy to Synology DS218+ following deployment scripts
-5. Set up HTTPS with Let's Encrypt
-6. Conduct end-to-end testing
+3. Confirm Container Manager rebuild picks up code changes
+4. Validate end-to-end clarification flow: “Turn on the basement lights” → choose candidate → command executes
+5. Optional: add cancel/timeout behavior for clarification
 
 ---
 

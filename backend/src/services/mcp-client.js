@@ -7,13 +7,105 @@ class MCPClient {
     this._toolAllowlist = null;
   }
 
+  _asIntOrNull(v) {
+    if (v === undefined || v === null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  _extractAmbiguity(toolName, args, toolResp) {
+    // c4-mcp returns: { ok: true, result: { ok: false, error: '...', details: { error: 'ambiguous', matches/candidates: [...] } } }
+    const inner = toolResp && typeof toolResp === 'object' ? toolResp.result : null;
+    const details = inner && typeof inner === 'object' ? inner.details : null;
+
+    const isAmbiguous = details
+      && typeof details === 'object'
+      && String(details.error || '').toLowerCase() === 'ambiguous'
+      && (Array.isArray(details.matches) || Array.isArray(details.candidates));
+
+    if (!isAmbiguous) return null;
+
+    const rawCandidates = Array.isArray(details.matches)
+      ? details.matches
+      : Array.isArray(details.candidates)
+        ? details.candidates
+        : [];
+
+    const candidates = rawCandidates
+      .map((c) => {
+        if (!c || typeof c !== 'object') return null;
+        const name = c.name || c.room_name || c.device_name;
+        return {
+          name: name ? String(name) : null,
+          room_id: c.room_id !== undefined ? this._asIntOrNull(c.room_id) : null,
+          room_name: c.room_name ? String(c.room_name) : null,
+          device_id: c.device_id ? String(c.device_id) : null,
+          score: c.score !== undefined ? this._asIntOrNull(c.score) : null,
+        };
+      })
+      .filter((c) => c && c.name);
+
+    // Determine what we're disambiguating for UI copy.
+    const kind = toolName.startsWith('c4_room_') ? 'room' : toolName.startsWith('c4_light_') ? 'light' : 'choice';
+    const query = kind === 'room'
+      ? (args && typeof args.room_name === 'string' ? args.room_name : null)
+      : kind === 'light'
+        ? (args && typeof args.device_name === 'string' ? args.device_name : null)
+        : null;
+
+    return {
+      kind,
+      query,
+      message: details.details || inner.error || 'Multiple matches found',
+      candidates,
+    };
+  }
+
+  buildRefinedIntentFromChoice(originalIntent, choice) {
+    if (!originalIntent || typeof originalIntent !== 'object') return null;
+    const tool = String(originalIntent.tool || '');
+    const args = originalIntent.args && typeof originalIntent.args === 'object' ? { ...originalIntent.args } : {};
+
+    if (!choice || typeof choice !== 'object') return null;
+
+    // Make the follow-up call strict.
+    args.require_unique = true;
+    args.include_candidates = false;
+
+    if (tool === 'c4_room_lights_set') {
+      if (choice.room_id !== null && choice.room_id !== undefined) {
+        args.room_id = this._asIntOrNull(choice.room_id);
+      }
+      if (choice.name) {
+        args.room_name = String(choice.name);
+      }
+      return { tool, args };
+    }
+
+    if (tool === 'c4_light_set_by_name') {
+      if (choice.name) {
+        args.device_name = String(choice.name);
+      }
+      // Scope by room if we have it.
+      if (choice.room_id !== null && choice.room_id !== undefined) {
+        args.room_id = this._asIntOrNull(choice.room_id);
+      } else if (choice.room_name) {
+        args.room_name = String(choice.room_name);
+      }
+      return { tool, args };
+    }
+
+    // Scenes: keep as-is for now.
+    return { tool, args };
+  }
+
   _baseUrl() {
     const raw = config.control4.mcpBaseUrl;
     if (!raw || typeof raw !== 'string') {
       throw new AppError(
         ErrorCodes.MCP_CONNECTION_ERROR,
         'C4_MCP_BASE_URL is not configured',
-        500
+        500,
       );
     }
     return raw.replace(/\/+$/, '');
@@ -56,7 +148,7 @@ class MCPClient {
         ErrorCodes.FORBIDDEN,
         `Tool not allowed: ${toolName}`,
         403,
-        { tool: toolName }
+        { tool: toolName },
       );
     }
   }
@@ -88,7 +180,9 @@ class MCPClient {
           ErrorCodes.MCP_COMMAND_ERROR,
           `MCP HTTP error: ${resp.status} ${resp.statusText}`,
           502,
-          { correlationId, url, status: resp.status, body: json }
+          {
+            correlationId, url, status: resp.status, body: json,
+          },
         );
       }
 
@@ -99,7 +193,7 @@ class MCPClient {
           ErrorCodes.MCP_COMMAND_ERROR,
           'MCP request timeout',
           504,
-          { correlationId, url, timeoutMs: this._timeoutMs() }
+          { correlationId, url, timeoutMs: this._timeoutMs() },
         );
       }
       if (error instanceof AppError) throw error;
@@ -107,7 +201,7 @@ class MCPClient {
         ErrorCodes.MCP_CONNECTION_ERROR,
         `Failed to reach MCP server: ${error.message}`,
         502,
-        { correlationId, url }
+        { correlationId, url },
       );
     } finally {
       clearTimeout(timeout);
@@ -133,7 +227,7 @@ class MCPClient {
         method: 'POST',
         body: JSON.stringify(body),
       },
-      correlationId
+      correlationId,
     );
   }
 
@@ -145,14 +239,14 @@ class MCPClient {
       throw new AppError(
         ErrorCodes.USER_INPUT_ERROR,
         'Invalid intent',
-        400
+        400,
       );
     }
 
     // Preferred shape: { tool: "c4_room_lights_set", args: {...} }
     if (intent.tool && intent.args) {
       const toolName = String(intent.tool);
-      const args = intent.args;
+      const { args } = intent;
 
       logger.info('Sending MCP tool call', {
         correlationId,
@@ -161,6 +255,29 @@ class MCPClient {
       });
 
       const result = await this.callTool(toolName, args, correlationId);
+      const clarification = this._extractAmbiguity(toolName, args, result);
+      if (clarification) {
+        return {
+          success: false,
+          tool: toolName,
+          args,
+          clarification,
+          result,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
+      // Treat tool-level failures as non-success.
+      if (result && typeof result === 'object' && result.result && result.result.ok === false) {
+        return {
+          success: false,
+          tool: toolName,
+          args,
+          result,
+          timestamp: new Date().toISOString(),
+        };
+      }
+
       return {
         success: true,
         tool: toolName,
@@ -199,7 +316,7 @@ class MCPClient {
         throw new AppError(
           ErrorCodes.USER_INPUT_ERROR,
           'Missing room_name for lights command',
-          400
+          400,
         );
       }
 
@@ -214,7 +331,7 @@ class MCPClient {
           throw new AppError(
             ErrorCodes.USER_INPUT_ERROR,
             'Missing level for set_brightness',
-            400
+            400,
           );
         }
         return {
@@ -230,7 +347,7 @@ class MCPClient {
         throw new AppError(
           ErrorCodes.USER_INPUT_ERROR,
           'Missing scene_name for scene command',
-          400
+          400,
         );
       }
       return {
@@ -243,7 +360,7 @@ class MCPClient {
       ErrorCodes.USER_INPUT_ERROR,
       'Unsupported intent',
       400,
-      { intent }
+      { intent },
     );
   }
 }

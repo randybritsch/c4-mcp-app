@@ -77,9 +77,8 @@ The PWA Frontend is a mobile-optimized Progressive Web App that provides the use
 
 | Output | Format | Destination | Purpose |
 |--------|--------|-------------|---------|
-| Voice Request | JSON + base64 audio | `POST /api/v1/voice` | Submit voice command |
-| Chat Request | JSON | `POST /api/v1/chat` | Submit text command |
-| Status Request | HTTP GET | `GET /api/v1/status` | Fetch device states |
+| Voice Request | JSON + base64 audio | `POST /api/v1/voice/process` | Submit voice command |
+| Text Request | JSON | `POST /api/v1/voice/process-text` | Submit text command |
 | WebSocket Messages | JSON | Backend WebSocket | Send control messages |
 | UI Updates | DOM manipulation | Browser | Display status, responses |
 
@@ -234,7 +233,7 @@ class APIClient {
    - Audio blob converts to base64 correctly
 
 2. **Text Commands:**
-   - User types message and presses Send → POST to `/api/v1/chat`
+  - User types message and presses Send → POST to `/api/v1/voice/process-text`
    - Response received → message displayed in chat history
    - Empty message → Send button disabled
 
@@ -376,8 +375,8 @@ Not typically used in frontend (static files), but can be injected at build time
 
 | Variable | Description | Default | Required |
 |----------|-------------|---------|----------|
-| `API_BASE_URL` | Backend API base URL | `/api/v1` | No |
-| `WS_BASE_URL` | WebSocket base URL | `wss://home.yourdomain.com/api/v1/ws` | No |
+| `API_BASE_URL` | Backend base URL (origin + port) | `http(s)://<host>:3002` | No |
+| `WS_BASE_URL` | WebSocket URL | `ws(s)://<host>:3002/ws` | No |
 | `DEBUG_MODE` | Enable debug logging | `false` | No |
 
 ### Configuration in Code
@@ -385,14 +384,20 @@ Not typically used in frontend (static files), but can be injected at build time
 **config.js:**
 
 ```javascript
-const config = {
-  apiBaseUrl: window.location.origin + '/api/v1',
-  wsBaseUrl: (window.location.protocol === 'https:' ? 'wss:' : 'ws:') + 
-              '//' + window.location.host + '/api/v1/ws',
-  maxAudioDuration: 10000, // milliseconds
-  reconnectAttempts: 3,
-  reconnectBackoff: [2000, 4000, 8000], // milliseconds
-  tokenStorageKey: 'c4_mcp_auth_token'
+// The shipped frontend supports runtime overrides so you can point the UI
+// at a NAS-hosted backend without rebuilding the static files.
+//
+// Examples:
+// - ?backend=http://192.168.1.50:3002
+// - ?api=http://192.168.1.50:3002&ws=ws://192.168.1.50:3002/ws
+//
+// By default (non-localhost), the UI targets the same hostname on port 3002
+// and uses WebSocket path `/ws`.
+const CONFIG = {
+  API_URL: 'http://<host>:3002',
+  WS_URL: 'ws://<host>:3002/ws',
+  DEVICE_ID: '<persisted in localStorage>',
+  DEVICE_NAME: '<derived from user agent>'
 };
 ```
 

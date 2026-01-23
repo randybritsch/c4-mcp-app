@@ -19,6 +19,7 @@ Allowed tools (choose ONE):
 - c4_light_set_by_name
 - c4_scene_activate_by_name
 - c4_scene_set_state_by_name
+- c4_list_rooms
 
 Rules:
 - Prefer c4_room_lights_set when the user mentions a room (e.g. "Basement").
@@ -33,6 +34,7 @@ Rules:
   - state: {"scene_name":"<Scene>","state":"on|off","room_name":"<Room>" (optional)}
 
 Examples:
+"List rooms" -> {"tool":"c4_list_rooms","args":{}}
 "Turn on the basement lights" -> {"tool":"c4_room_lights_set","args":{"room_name":"Basement","state":"on"}}
 "Set kitchen lights to 30%" -> {"tool":"c4_room_lights_set","args":{"room_name":"Kitchen","level":30}}
 "Turn off the pendant lights" -> {"tool":"c4_light_set_by_name","args":{"device_name":"Pendant Lights","state":"off"}}
@@ -42,51 +44,217 @@ Examples:
  * Parse intent using OpenAI
  */
 async function parseWithOpenAI(transcript, correlationId) {
-  const apiKey = config.llm.openai.apiKey;
+  const { apiKey } = config.llm.openai;
   if (!apiKey) {
     throw new AppError(
       ErrorCodes.LLM_ERROR,
       'OpenAI API key not configured',
-      500
+      500,
     );
   }
 
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: config.llm.openai.model,
-        messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
-          { role: 'user', content: transcript },
-        ],
-        temperature: 0.3,
-        max_tokens: 150,
-      }),
-    });
+    const model = String(config.llm.openai.model || '').trim();
+    const tokenLimit = 150;
 
-    if (!response.ok) {
-      const error = await response.json();
-      throw new Error(error.error?.message || 'LLM API error');
+    if (!model) {
+      throw new Error('OpenAI model not configured');
     }
 
-    const data = await response.json();
-    const content = data.choices[0].message.content.trim();
+    // Some newer OpenAI reasoning models (e.g. o1/o3*) reject temperature and require max_completion_tokens.
+    const isReasoningModel = /^o(1|3)(-|$)/i.test(model);
 
-    // Parse JSON response
-    const intent = JSON.parse(content);
+    const sanitizeModelJson = (raw) => {
+      const text = String(raw || '').trim();
+      if (!text) return '';
 
-    return intent;
+      // Strip common markdown code fences
+      const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+      if (fenced && fenced[1]) return fenced[1].trim();
+
+      return text;
+    };
+
+    const parseJsonLoose = (raw) => {
+      const cleaned = sanitizeModelJson(raw);
+      if (!cleaned) {
+        throw new Error('Empty response from LLM');
+      }
+
+      try {
+        return JSON.parse(cleaned);
+      } catch {
+        // Try extracting the first JSON object from mixed text
+        const start = cleaned.indexOf('{');
+        const end = cleaned.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          const candidate = cleaned.slice(start, end + 1);
+          return JSON.parse(candidate);
+        }
+        throw new Error(`Invalid JSON response from LLM: ${cleaned.slice(0, 200)}`);
+      }
+    };
+
+    const messages = [
+      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'user', content: transcript },
+    ];
+
+    const extractAssistantText = (data) => {
+      const choice = data?.choices?.[0];
+      const message = choice?.message;
+
+      // Standard Chat Completions shape
+      if (typeof message?.content === 'string') return message.content;
+
+      // Some variants may return content as an array of parts
+      if (Array.isArray(message?.content)) {
+        const joined = message.content
+          .map((part) => {
+            if (typeof part === 'string') return part;
+            if (part && typeof part.text === 'string') return part.text;
+            if (part && typeof part.content === 'string') return part.content;
+            return '';
+          })
+          .join('')
+          .trim();
+        if (joined) return joined;
+      }
+
+      // If the model returned a tool call, extract its arguments as JSON
+      const toolArgs = message?.tool_calls?.[0]?.function?.arguments;
+      if (typeof toolArgs === 'string' && toolArgs.trim()) return toolArgs;
+
+      // Older-style completions
+      if (typeof choice?.text === 'string') return choice.text;
+
+      return '';
+    };
+
+    const callChatCompletions = async (
+      tokenPayload,
+      { includeTemperature, includeResponseFormat },
+    ) => {
+      const basePayload = {
+        model,
+        messages,
+        ...(includeTemperature ? { temperature: 0.3 } : {}),
+        ...(includeResponseFormat
+          ? { response_format: { type: 'json_object' } }
+          : {}),
+      };
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ ...basePayload, ...tokenPayload }),
+      });
+
+      if (!response.ok) {
+        let message = 'LLM API error';
+        try {
+          const error = await response.json();
+          message = error.error?.message || message;
+        } catch {
+          // ignore parse errors
+        }
+        throw new Error(message);
+      }
+
+      return response.json();
+    };
+
+    const tryRequest = async (tokenPayload, options) => {
+      try {
+        return await callChatCompletions(tokenPayload, options);
+      } catch (err) {
+        const msg = String(err?.message || err);
+
+        // Some models/endpoints don't support response_format; retry without it.
+        if (options.includeResponseFormat && msg.toLowerCase().includes('response_format')) {
+          return await callChatCompletions(tokenPayload, {
+            ...options,
+            includeResponseFormat: false,
+          });
+        }
+
+        // Some models reject temperature; retry without it.
+        if (
+          options.includeTemperature
+          && (msg.includes("Unsupported value: 'temperature'")
+            || msg.includes('Only the default (1) value is supported'))
+        ) {
+          return await callChatCompletions(tokenPayload, {
+            ...options,
+            includeTemperature: false,
+          });
+        }
+
+        throw err;
+      }
+    };
+
+    const requestAndParse = async (tokenPayload, options) => {
+      const data = await tryRequest(tokenPayload, options);
+      const content = extractAssistantText(data);
+
+      if (!content) {
+        logger.warn('OpenAI returned no content', {
+          correlationId,
+          model,
+          topLevelKeys: Object.keys(data || {}),
+          choiceKeys: Object.keys(data?.choices?.[0] || {}),
+          messageKeys: Object.keys(data?.choices?.[0]?.message || {}),
+          finishReason: data?.choices?.[0]?.finish_reason,
+        });
+      }
+
+      return parseJsonLoose(content);
+    };
+
+    // Reasoning models generally require max_completion_tokens. Others may require max_tokens.
+    // Also, some models reject non-default temperature values.
+    const defaultIncludeTemperature = !isReasoningModel;
+
+    // Try progressively more permissive request options if we can't parse a valid JSON object.
+    const optionAttempts = [
+      { includeTemperature: defaultIncludeTemperature, includeResponseFormat: true },
+      { includeTemperature: false, includeResponseFormat: true },
+      { includeTemperature: false, includeResponseFormat: false },
+    ];
+
+    const tokenAttempts = [
+      { key: 'max_completion_tokens', payload: { max_completion_tokens: tokenLimit } },
+      { key: 'max_tokens', payload: { max_tokens: tokenLimit } },
+    ];
+
+    let lastError;
+    for (const options of optionAttempts) {
+      for (const tokenAttempt of tokenAttempts) {
+        try {
+          return await requestAndParse(tokenAttempt.payload, options);
+        } catch (err) {
+          lastError = err;
+          const msg = String(err?.message || err);
+
+          // If the API says a token param is unsupported, try the other param.
+          if (msg.includes(`Unsupported parameter: '${tokenAttempt.key}'`)) {
+            continue;
+          }
+        }
+      }
+    }
+
+    throw lastError || new Error('LLM returned no usable JSON');
   } catch (error) {
     logger.error('OpenAI parsing error', { correlationId, error: error.message });
     throw new AppError(
       ErrorCodes.LLM_ERROR,
       `Intent parsing failed: ${error.message}`,
-      500
+      500,
     );
   }
 }
@@ -94,13 +262,13 @@ async function parseWithOpenAI(transcript, correlationId) {
 /**
  * Parse intent using Anthropic
  */
-async function parseWithAnthropic(transcript, correlationId) {
-  const apiKey = config.llm.anthropic.apiKey;
+async function parseWithAnthropic(_transcript, _correlationId) {
+  const { apiKey } = config.llm.anthropic;
   if (!apiKey) {
     throw new AppError(
       ErrorCodes.LLM_ERROR,
       'Anthropic API key not configured',
-      500
+      500,
     );
   }
 
@@ -108,7 +276,7 @@ async function parseWithAnthropic(transcript, correlationId) {
   throw new AppError(
     ErrorCodes.LLM_ERROR,
     'Anthropic LLM not yet implemented',
-    501
+    501,
   );
 }
 
@@ -133,7 +301,7 @@ async function parseIntent(transcript, correlationId) {
     throw new AppError(
       ErrorCodes.LLM_ERROR,
       `Unknown LLM provider: ${config.llm.provider}`,
-      500
+      500,
     );
   }
 

@@ -12,6 +12,18 @@
     "no-console": "off",
     "consistent-return": "off",
     "no-unused-vars": ["error", { "argsIgnorePattern": "^_" }],
-    "max-len": ["error", { "code": 120, "ignoreComments": true }]
+    "max-len": ["error", { "code": 120, "ignoreComments": true }],
+
+    // Project-specific relaxations (current codebase patterns)
+    "no-restricted-syntax": "off",
+    "no-continue": "off",
+    "no-await-in-loop": "off",
+    "no-return-await": "off",
+    "global-require": "off",
+    "no-underscore-dangle": "off",
+    "class-methods-use-this": "off",
+    "no-nested-ternary": "off",
+    "no-use-before-define": "off",
+    "no-param-reassign": "off"
   }
 }

@@ -1,14 +1,16 @@
 # Project Overview: C4-MCP-App
 
 **Version:** 1.0.0  
-**Last Updated:** January 20, 2026  
+**Last Updated:** January 23, 2026  
 **Status:** ✅ DEPLOYED - Running in Production
 
 ---
 
 ## 1. Executive Summary {#executive-summary}
 
-C4-MCP-App is a lightweight, phone-based smart home control interface that enables voice and text interaction with Control4 home automation systems. The system consists of a Progressive Web App (PWA) frontend that communicates with an AI-powered backend service running on a Synology DS218+ NAS. The backend interprets natural language commands via cloud-based LLM services and translates them into deterministic MCP (Model Context Protocol) commands for Control4 integration. Designed specifically for resource-constrained home NAS environments, the architecture avoids Docker containers and heavy local processing, instead leveraging cloud APIs for AI capabilities while maintaining fast, reliable local execution of home automation commands.
+C4-MCP-App is a lightweight, phone-based smart home control interface that enables voice and text interaction with Control4 home automation systems. The system consists of a Progressive Web App (PWA) frontend that communicates with an AI-powered backend service running on a Synology NAS. The backend interprets natural language commands via cloud-based AI services and translates them into deterministic `c4-mcp` tool calls for Control4 integration.
+
+Reference deployment uses **Synology Container Manager (Docker Compose)** for repeatability, while keeping runtime/resource usage small.
 
 ---
 
@@ -35,11 +37,11 @@ C4-MCP-App is a lightweight, phone-based smart home control interface that enabl
 │             │              │                │
 │  ┌──────────▼────────┐  ┌──▼─────────────┐ │
 │  │   Web Station     │  │  Backend Service│ │
-│  │   (PWA Host)      │  │  (Node.js/Py)  │ │
+│  │   (PWA Host)      │  │   (Node.js)    │ │
 │  └───────────────────┘  └──┬──────────────┘ │
 │                            │                │
 └────────────────────────────┼────────────────┘
-                             │ MCP Protocol
+                             │ HTTP (tool calls)
                              │
                 ┌────────────▼───────────┐
                 │   MCP Server           │
@@ -58,35 +60,35 @@ C4-MCP-App is a lightweight, phone-based smart home control interface that enabl
 | Component | Technology | Runs On | Purpose |
 |-----------|-----------|---------|---------|
 | PWA Frontend | HTML5/CSS3/JavaScript | Mobile Browser | User interface, voice input, status display |
-| Backend Service | Node.js or Python | Synology DS218+ | Intent parsing, MCP coordination, API gateway |
-| Web Station | Synology DSM | DS218+ | Static PWA hosting |
+| Backend Service | Node.js (Express) | Synology DS218+ | Intent parsing, `c4-mcp` coordination, API gateway |
+| Static Hosting (Optional) | Web Station / local server | LAN device | Hosts the frontend files (often run locally for mic permissions) |
 | Reverse Proxy | Synology DSM | DS218+ | HTTPS termination, routing, WebSocket support |
-| MCP Server | Existing | Unknown | Control4 integration bridge |
-| Cloud LLM | OpenAI/Anthropic/etc | Cloud | Natural language understanding |
+| MCP Server | `c4-mcp` (HTTP) | Synology (container) | Control4 integration bridge |
+| Cloud LLM | OpenAI (tested with `gpt-4o-mini`) | Cloud | Natural language understanding |
 | Cloud STT | Google/Azure/etc | Cloud | Speech-to-text conversion |
 
 ### 2.3 Data Flow
 
 1. **User Input Flow:**
    - User taps/holds button in PWA → records audio
-   - Audio sent via HTTPS POST to `/api/voice`
+  - Audio sent via WebSocket streaming (or posted as base64 to `POST /api/v1/voice/process`)
    - Backend forwards to cloud STT service → text transcript
    - Text sent to cloud LLM with Control4 context → intent + parameters
-   - Backend translates intent to MCP command
-   - MCP command executed via MCP server
+  - Backend translates intent to a `c4-mcp` tool call (HTTP)
+  - Tool call executed via `c4-mcp`
    - Response streamed back via WebSocket to PWA
 
 2. **Text Input Flow:**
    - User types in PWA chat interface
-   - Text sent via HTTPS POST to `/api/chat`
+  - Text sent via HTTPS POST to `POST /api/v1/voice/process-text`
    - Backend sends to cloud LLM → intent + parameters
    - (Same as above from intent extraction onward)
 
 ### 2.4 External Dependencies
 
 - **Cloud STT Provider** (Google Speech-to-Text, Azure Speech, or AWS Transcribe)
-- **Cloud LLM Provider** (OpenAI GPT-4, Anthropic Claude, or similar)
-- **MCP Server** (existing, Control4 integration)
+- **Cloud LLM Provider** (OpenAI; tested with `gpt-4o-mini`)
+- **MCP Server** (`c4-mcp` HTTP server)
 - **Let's Encrypt** (SSL certificates via Synology DSM)
 - **Public DNS** (for HTTPS access)
 
@@ -144,8 +146,8 @@ c4-mcp-app/
 │   │   │   └── routes.test.js     # Jest tests
 │   │   ├── services/              # Business logic
 │   │   │   ├── stt.js             # Google/Azure STT
-│   │   │   ├── llm.js             # OpenAI/Anthropic LLM
-│   │   │   ├── mcp-client.js      # Control4 MCP client
+│   │   │   ├── llm.js             # OpenAI LLM
+│   │   │   ├── mcp-client.js      # `c4-mcp` HTTP client
 │   │   │   └── voice-processor.js # Pipeline orchestration
 │   │   ├── middleware/            # Express middleware
 │   │   │   ├── auth.js            # JWT validation
@@ -200,16 +202,16 @@ c4-mcp-app/
 | **Boundaries** | Runs on DS218+ as persistent process; no GPU or heavy ML |
 | **Upstream** | PWA Frontend, Cloud STT, Cloud LLM |
 | **Downstream** | MCP Server |
-| **Key Technologies** | Node.js (Express/Fastify) or Python (FastAPI/Flask), WebSocket library |
+| **Key Technologies** | Node.js (Express), WebSocket library |
 
 ### 4.3 MCP Client Module
 
 | Property | Value |
 |----------|-------|
 | **Name** | MCP Client |
-| **Purpose** | Translate intents to MCP protocol commands for Control4 |
+| **Purpose** | Translate intents to `c4-mcp` HTTP tool calls for Control4 |
 | **Inputs** | Structured intent objects (action, device, parameters) |
-| **Outputs** | MCP protocol messages, status confirmations |
+| **Outputs** | `c4-mcp` call payloads, status confirmations |
 | **Boundaries** | Stateless command translator; no business logic |
 | **Upstream** | Backend Service (LLM output) |
 | **Downstream** | MCP Server |
@@ -225,7 +227,7 @@ c4-mcp-app/
 | **Outputs** | Transcribed text, parsed intents with parameters |
 | **Boundaries** | External API calls; must handle rate limits and failures |
 | **Upstream** | Backend Service |
-| **Downstream** | Cloud providers (Google/OpenAI/Anthropic/etc) |
+| **Downstream** | Cloud providers (Google/OpenAI/etc) |
 | **Key Technologies** | HTTP clients, API SDKs, retry logic |
 
 ### 4.5 Authentication Module
@@ -305,9 +307,9 @@ c4-mcp-app/
 
 ### 5.2 Versioning Strategy
 
-- **API Versioning:** URL-based (`/api/v1/chat`)
+- **API Versioning:** URL-based (`/api/v1/*`)
 - **Schema Versioning:** Backward-compatible additions; breaking changes require new major version
-- **MCP Protocol:** Follow existing MCP server's contract (external dependency)
+- **`c4-mcp` contract:** Follow the tool names/args exposed by `c4-mcp` (`/mcp/list`, `/mcp/call`)
 
 ---
 
@@ -317,18 +319,17 @@ c4-mcp-app/
 
 | Method | Path | Purpose | Auth Required |
 |--------|------|---------|---------------|
-| POST | `/api/v1/voice` | Submit voice audio for processing | Yes |
-| POST | `/api/v1/chat` | Submit text message | Yes |
-| GET | `/api/v1/devices` | List available Control4 devices | Yes |
-| GET | `/api/v1/status` | Get current device states | Yes |
-| POST | `/api/v1/auth/login` | Authenticate user | No |
+| POST | `/api/v1/auth/token` | Get a device JWT | No |
 | GET | `/api/v1/health` | Health check | No |
+| GET | `/api/v1/health/mcp` | Backend → `c4-mcp` connectivity | No |
+| POST | `/api/v1/voice/process` | Process a voice audio payload | Yes |
+| POST | `/api/v1/voice/process-text` | Process a text command | Yes |
 
 ### 6.2 WebSocket Endpoint
 
 | Path | Purpose | Auth Required |
 |------|---------|---------------|
-| `/api/v1/ws` | Bidirectional streaming for real-time updates | Yes (via query param or header) |
+| `/ws` | Bidirectional streaming for real-time updates + clarification loop | Yes (query param `token=...`) |
 
 ### 6.3 Authentication
 
@@ -339,12 +340,11 @@ c4-mcp-app/
 
 ### 6.4 Example Request/Response
 
-**POST `/api/v1/chat`**
+**POST `/api/v1/voice/process-text`**
 ```json
 Request:
 {
-  "message": "Set bedroom temperature to 72 degrees",
-  "device_id": "mobile-abc123"
+  "text": "Set bedroom temperature to 72 degrees"
 }
 
 Response:
@@ -359,15 +359,15 @@ Response:
 
 ## 7. Decision Log (ADR-Style) {#decisions}
 
-### ADR-001: No Docker/Containers
-- **Context:** Synology DS218+ has limited resources; Docker adds overhead
-- **Decision:** Use native DSM tools (Web Station, Task Scheduler)
-- **Rationale:** Simpler deployment, lower resource usage, more stable on constrained hardware
-- **Consequences:** Manual service management, no containerized isolation
+### ADR-001: Containerized Deployment (Compose)
+- **Context:** Need reliable repeatable deployment on the NAS
+- **Decision:** Use Synology Container Manager (Docker Compose) as the reference deployment
+- **Rationale:** Repeatability, easy rebuild/recreate, clean dependency boundaries
+- **Consequences:** Requires Container Manager; container logging/ops conventions apply
 
 ### ADR-002: Cloud-Based AI Services
 - **Context:** DS218+ cannot run local LLMs or heavy ML workloads
-- **Decision:** Use cloud STT (Google/Azure) and cloud LLM (OpenAI/Anthropic)
+- **Decision:** Use cloud STT (Google/Azure) and cloud LLM (OpenAI; tested with `gpt-4o-mini`)
 - **Rationale:** Offload compute to cloud; NAS only coordinates
 - **Consequences:** Network dependency, API costs, latency ~500-1500ms
 
@@ -499,11 +499,13 @@ Response:
    - SSH to NAS: `ssh admin@<NAS_IP>`
    - Install Node.js via Synology Package Center or manual install
    - Navigate to backend: `cd /volume1/apps/c4-mcp-app/backend`
-   - Install dependencies: `npm install` or `pip install -r requirements.txt`
+  - Install dependencies: `npm install`
 
 4. **Configure Environment Variables:**
    - Copy `.env.example` to `.env`
-   - Set `STT_API_KEY`, `LLM_API_KEY`, `MCP_SERVER_URL`, etc.
+  - Set STT provider keys (`GOOGLE_STT_API_KEY` / `AZURE_STT_KEY` / `AZURE_STT_REGION`), `OPENAI_API_KEY`, and `C4_MCP_BASE_URL` (+ `C4_MCP_TIMEOUT_MS`)
+
+  If deploying via **Synology Container Manager (Compose)**, prefer setting these as container environment variables (or via a compose-managed `.env`), and skip the Task Scheduler/native process steps below.
 
 5. **Create Startup Script:**
    - Save to `/volume1/apps/c4-mcp-app/scripts/start-backend.sh`:
@@ -524,8 +526,8 @@ Response:
    - Open DSM → Control Panel → Login Portal → Advanced → Reverse Proxy
    - Create rules:
      - Source: `https://home.yourdomain.com/` → Destination: `http://localhost:80` (PWA)
-     - Source: `https://home.yourdomain.com/api/*` → Destination: `http://localhost:3001` (Backend)
-   - Enable WebSocket support for `/api/v1/ws`
+     - Source: `https://home.yourdomain.com/api/*` → Destination: `http://localhost:3002` (Backend)
+   - Enable WebSocket support for `/ws`
 
 8. **Configure Let's Encrypt:**
    - Open DSM → Control Panel → Security → Certificate
@@ -546,8 +548,8 @@ Response:
 
 ### 10.4 Configuration
 
-- **Backend Port:** 3001 (configurable in `.env`)
-- **WebSocket Port:** Same as backend (3001)
+- **Backend Port:** 3002 (configurable in env)
+- **WebSocket Port:** Same as backend (3002)
 - **Log Level:** `INFO` (production), `DEBUG` (development)
 - **Session Timeout:** 30 days
 
@@ -674,7 +676,7 @@ Response:
 - [x] Initialize project repository and documentation
 - [ ] Design REST API contract and WebSocket protocol
 - [ ] Create basic PWA shell (HTML, CSS, JS scaffolding)
-- [ ] Implement backend service scaffold (Node.js or Python)
+- [x] Implement backend service scaffold (Node.js)
 - [ ] Integrate cloud STT API (proof-of-concept)
 - [ ] Integrate cloud LLM API (proof-of-concept)
 - [ ] Create MCP client module (mock MCP server for testing)
@@ -721,7 +723,7 @@ Response:
 | **Reverse Proxy** | Synology DSM feature for routing HTTPS traffic to internal services |
 | **Let's Encrypt** | Free, automated certificate authority for HTTPS certificates |
 | **STT** | Speech-to-Text; converts audio to text (e.g., Google Speech-to-Text) |
-| **LLM** | Large Language Model; AI for natural language understanding (e.g., GPT-4) |
+| **LLM** | Large Language Model; AI for natural language understanding (e.g., `gpt-4o-mini`) |
 | **WebSocket** | Protocol for bidirectional, real-time communication over HTTP |
 | **JWT** | JSON Web Token; standard for secure token-based authentication |
 | **Intent** | Parsed user command (action + device + parameters) |
@@ -759,15 +761,14 @@ Response:
   - Deployment: Synology scripts, health checks, comprehensive documentation
   - Status: Ready for production deployment
 - 2026-01-20: Production deployment completed
-  - **Backend**: Running at http://192.168.1.237:3001 (port 3000→3001 due to conflict)
-  - **Frontend**: Deployed via Web Station at http://192.168.1.237
-  - **Auto-start**: Task Scheduler configured for boot-up
-  - **Control4**: Director configured at 192.168.1.142:9000
-  - **Config Fix**: Added missing src/config/index.js file
-  - **Documentation**: Added deployment guides (Task Scheduler, API Keys, completion summary)
-  - **GitHub**: All code committed to https://github.com/randybritsch/c4-mcp-app
-  - **Status**: ✅ Backend healthy and responding, frontend accessible
-  - **Pending**: API keys (Google STT, OpenAI), SSL certificate, Control4 protocol implementation
+  - (Legacy) Native DSM deployment notes (Web Station/Task Scheduler)
+
+- 2026-01-23: Reference deployment updated
+  - **Deployment**: Synology Container Manager (Compose project)
+  - **Backend**: `http://<NAS_IP>:3002`
+  - **Control4 bridge**: `c4-mcp` via `C4_MCP_BASE_URL` (e.g., `http://<NAS_IP>:3333`)
+  - **LLM**: OpenAI; tested with `gpt-4o-mini`
+  - **Feature**: interactive ambiguity clarification loop (`clarification-required` / `clarification-choice`)
 
 ---
 

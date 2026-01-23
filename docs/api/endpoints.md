@@ -2,7 +2,7 @@
 
 **Project:** C4-MCP-App  
 **Version:** 1.0.0  
-**Last Updated:** January 19, 2026
+**Last Updated:** January 23, 2026
 
 > [← Back to Project Overview](../project_overview.md)
 
@@ -29,13 +29,13 @@ The API uses **JWT (JSON Web Token)** for authentication.
 │  Client  │                    │   Backend   │
 └─────┬────┘                    └──────┬──────┘
       │                                │
-      │ POST /api/v1/auth/login        │
-      │ { device_id: "..." }           │
+      │ POST /api/v1/auth/token        │
+      │ { deviceId: "..." }            │
       │───────────────────────────────>│
       │                                │
       │                     ┌──────────▼────────┐
       │                     │ Generate JWT      │
-      │                     │ (30-day expiry)   │
+      │                     │ (or never-expire) │
       │                     └──────────┬────────┘
       │                                │
       │ 200 OK                         │
@@ -67,9 +67,10 @@ The API uses **JWT (JSON Web Token)** for authentication.
     "typ": "JWT"
   },
   "payload": {
-    "device_id": "mobile-abc123",
-    "iat": 1705660800,
-    "exp": 1708252800
+    "deviceId": "mobile-abc123",
+    "deviceName": "My Phone",
+    "issuedAt": "2026-01-23T10:30:00Z",
+    "iat": 1705660800
   }
 }
 ```
@@ -83,7 +84,7 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 **WebSocket Query Parameter:**
 ```
-wss://home.yourdomain.com/api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ws://<host>:<port>/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 ---
@@ -92,12 +93,12 @@ wss://home.yourdomain.com/api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..
 
 ### Base URL
 
-- **Production:** `https://home.yourdomain.com/api/v1`
-- **Local Development:** `http://localhost:3001/api/v1`
+- **Production (LAN):** `http://<NAS_IP>:3002/api/v1`
+- **Local Development:** `http://localhost:3000/api/v1`
 
 ---
 
-### 2.1 POST `/api/v1/auth/login`
+### 2.1 POST `/api/v1/auth/token`
 
 Authenticate a device and receive a JWT token.
 
@@ -106,11 +107,12 @@ Authenticate a device and receive a JWT token.
 **Request:**
 
 ```http
-POST /api/v1/auth/login HTTP/1.1
+POST /api/v1/auth/token HTTP/1.1
 Content-Type: application/json
 
 {
-  "device_id": "mobile-abc123"
+  "deviceId": "mobile-abc123",
+  "deviceName": "My Phone"
 }
 ```
 
@@ -119,18 +121,18 @@ Content-Type: application/json
 ```json
 {
   "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJkZXZpY2VfaWQiOiJtb2JpbGUtYWJjMTIzIiwiaWF0IjoxNzA1NjYwODAwLCJleHAiOjE3MDgyNTI4MDB9.xyz",
-  "expires_in": 2592000
+  "expiresIn": "never"
 }
 ```
 
 **Error Responses:**
 
-- `400 Bad Request`: Missing or invalid `device_id`
+- `400 Bad Request`: Missing or invalid `deviceId`
 - `500 Internal Server Error`: Token generation failed
 
 ---
 
-### 2.2 POST `/api/v1/voice`
+### 2.2 POST `/api/v1/voice/process`
 
 Submit voice audio for processing.
 
@@ -139,16 +141,13 @@ Submit voice audio for processing.
 **Request:**
 
 ```http
-POST /api/v1/voice HTTP/1.1
+POST /api/v1/voice/process HTTP/1.1
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 Content-Type: application/json
 
 {
-  "audio": "data:audio/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKE...",
-  "format": "webm",
-  "duration_ms": 3500,
-  "device_id": "mobile-abc123",
-  "timestamp": "2026-01-19T10:30:00Z"
+  "audioData": "GkXfo59ChoEBQveBAULygQRC84EIQoKE...",
+  "format": "webm"
 }
 ```
 
@@ -156,19 +155,20 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `audio` | string | Yes | Base64-encoded audio data (max 5MB) |
+| `audioData` | string | Yes | Base64-encoded audio data (max 5MB) |
 | `format` | string | Yes | Audio format (`webm`, `wav`, `mp3`) |
-| `duration_ms` | number | Yes | Audio duration in milliseconds (max 10000) |
-| `device_id` | string | Yes | Device UUID |
-| `timestamp` | string | Yes | ISO 8601 timestamp |
+| `duration_ms` | number | No | Optional client-side duration metadata |
 
 **Response (200 OK):**
 
 ```json
 {
-  "request_id": "req-xyz789",
-  "status": "processing",
-  "message": "Voice command received and processing"
+  "transcript": "Turn on the living room lights",
+  "confidence": 0.92,
+  "plan": { "tool": "c4_room_lights_set", "args": { "room_name": "Living Room", "state": "on" } },
+  "command": { "success": true, "tool": "c4_room_lights_set", "args": { "room_name": "Living Room", "state": "on" } },
+  "processingTime": 1340,
+  "timestamp": "2026-01-23T10:30:00Z"
 }
 ```
 
@@ -180,15 +180,7 @@ Content-Type: application/json
 | `status` | string | `processing`, `success`, or `error` |
 | `message` | string | Human-readable status message |
 
-**Status Updates (via WebSocket):**
-
-After submitting, the client receives real-time updates via WebSocket:
-
-```json
-{"type": "transcript", "content": "Turn on the living room lights", "request_id": "req-xyz789"}
-{"type": "intent", "content": "Action: turn_on, Device: living_room_lights", "request_id": "req-xyz789"}
-{"type": "execution", "content": "Living room lights turned on", "status": "success", "request_id": "req-xyz789"}
-```
+Note: The PWA primarily uses the **WebSocket** pipeline (see section 3) for real-time progress updates. This REST endpoint is a synchronous alternative.
 
 **Error Responses:**
 
@@ -200,23 +192,21 @@ After submitting, the client receives real-time updates via WebSocket:
 
 ---
 
-### 2.3 POST `/api/v1/chat`
+### 2.3 POST `/api/v1/voice/process-text`
 
-Submit a text message for processing.
+Submit a text command for processing (skips STT).
 
 **Auth Required:** Yes
 
 **Request:**
 
 ```http
-POST /api/v1/chat HTTP/1.1
+POST /api/v1/voice/process-text HTTP/1.1
 Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 Content-Type: application/json
 
 {
-  "message": "Turn on the living room lights",
-  "device_id": "mobile-abc123",
-  "timestamp": "2026-01-19T10:30:00Z"
+  "transcript": "Turn on the living room lights"
 }
 ```
 
@@ -224,21 +214,25 @@ Content-Type: application/json
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `message` | string | Yes | User's text command (max 500 chars) |
-| `device_id` | string | Yes | Device UUID |
-| `timestamp` | string | Yes | ISO 8601 timestamp |
+| `transcript` | string | Yes | User's text command |
 
 **Response (200 OK):**
 
 ```json
 {
-  "request_id": "req-abc456",
-  "status": "processing",
-  "message": "Text command received and processing"
+  "transcript": "Turn on the living room lights",
+  "plan": { "tool": "c4_room_lights_set", "args": { "room_name": "Living Room", "state": "on" } },
+  "command": { "success": true, "tool": "c4_room_lights_set", "args": { "room_name": "Living Room", "state": "on" } },
+  "timestamp": "2026-01-23T10:30:00Z"
 }
 ```
 
-**Status Updates:** Same as voice endpoint (via WebSocket).
+**Status Updates:** For real-time progress + interactive clarification, prefer the WebSocket protocol.
+
+**Clarification loop (Option C):**
+
+- If the Control4 command is ambiguous (e.g., multiple rooms match "Basement"), the backend emits `clarification-required` over WebSocket with a candidate list.
+- The client responds with `clarification-choice` (an index) and the backend retries with stricter parameters.
 
 **Error Responses:**
 
@@ -249,9 +243,11 @@ Content-Type: application/json
 
 ---
 
-### 2.4 GET `/api/v1/devices`
+### 2.4 GET `/api/v1/devices` (Planned)
 
 Retrieve list of available Control4 devices.
+
+Status: **Not implemented** in the current build (expect `404`).
 
 **Auth Required:** Yes
 
@@ -316,9 +312,11 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 
 ---
 
-### 2.5 GET `/api/v1/status`
+### 2.5 GET `/api/v1/status` (Planned)
 
 Get current state of all devices or a specific device.
+
+Status: **Not implemented** in the current build (expect `404`).
 
 **Auth Required:** Yes
 
@@ -378,21 +376,36 @@ GET /api/v1/health HTTP/1.1
 
 ```json
 {
-  "status": "ok",
-  "timestamp": "2026-01-19T10:30:00Z",
-  "version": "1.0.0",
-  "uptime_seconds": 123456
+  "status": "healthy",
+  "timestamp": "2026-01-23T10:30:00Z",
+  "uptime": 123.45,
+  "nodeVersion": "v22.x"
 }
 ```
 
-**Response (503 Service Unavailable):**
+**Response (502 Bad Gateway):**
 
 ```json
 {
   "status": "degraded",
-  "message": "MCP server unreachable",
-  "timestamp": "2026-01-19T10:30:00Z"
+  "mcp": {
+    "error": "MCP server unreachable"
+  },
+  "timestamp": "2026-01-23T10:30:00Z"
 }
+
+---
+
+### 2.7 GET `/api/v1/health/mcp`
+
+Checks connectivity to the `c4-mcp` server and returns a tool count/sample.
+
+**Auth Required:** No
+
+**Request:**
+
+```http
+GET /api/v1/health/mcp HTTP/1.1
 ```
 
 ---
@@ -401,20 +414,20 @@ GET /api/v1/health HTTP/1.1
 
 ### Connection
 
-**Endpoint:** `wss://home.yourdomain.com/api/v1/ws`
+**Endpoint:** `ws://<host>:<port>/ws`
 
 **Authentication:**
 
 Include JWT token as query parameter:
 
 ```
-wss://home.yourdomain.com/api/v1/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ws://<host>:<port>/ws?token=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 ```
 
 **Connection Flow:**
 
 ```javascript
-const ws = new WebSocket('wss://home.yourdomain.com/api/v1/ws?token=' + token);
+const ws = new WebSocket('ws://<host>:<port>/ws?token=' + token);
 
 ws.onopen = () => {
   console.log('WebSocket connected');
@@ -439,103 +452,119 @@ ws.onclose = () => {
 
 ### Message Types (Server → Client)
 
-#### 3.1 Transcript Message
+These are the message types currently emitted by the backend WebSocket server.
 
-Sent after voice audio is transcribed.
+#### connected
+
+Sent immediately after a successful WebSocket connection.
+
+```json
+{ "type": "connected", "correlationId": "...", "message": "WebSocket connection established" }
+```
+
+#### audio-ready
+
+Sent after `audio-start` to confirm the server is ready for chunks.
+
+```json
+{ "type": "audio-ready", "message": "Ready to receive audio" }
+```
+
+#### processing
+
+Progress updates while the pipeline runs.
+
+```json
+{ "type": "processing", "stage": "transcription" }
+```
+
+Stages are typically: `transcription` → `intent-parsing` → `executing`.
+
+#### transcript
+
+```json
+{ "type": "transcript", "transcript": "Turn on the basement lights", "confidence": 0.93 }
+```
+
+#### intent
+
+```json
+{ "type": "intent", "intent": { "tool": "c4_room_lights_set", "args": { "room_name": "Basement", "state": "on" } } }
+```
+
+#### command-complete
+
+```json
+{ "type": "command-complete", "result": { "success": true, "tool": "c4_room_lights_set", "args": { "room_name": "Basement", "state": "on" } }, "transcript": "...", "intent": { "tool": "...", "args": { } } }
+```
+
+#### clarification-required
+
+Sent when the MCP command was ambiguous and needs a user choice.
 
 ```json
 {
-  "type": "transcript",
-  "content": "Turn on the living room lights",
-  "confidence": 0.96,
-  "request_id": "req-xyz789",
-  "timestamp": "2026-01-19T10:30:01Z"
+  "type": "clarification-required",
+  "transcript": "Turn on the basement lights",
+  "intent": { "tool": "c4_room_lights_set", "args": { "room_name": "Basement", "state": "on" } },
+  "clarification": {
+    "kind": "room",
+    "query": "Basement",
+    "message": "Multiple matches found",
+    "candidates": [
+      { "name": "Basement Stairs", "room_id": 123, "score": 98 },
+      { "name": "Basement Bathroom", "room_id": 124, "score": 90 }
+    ]
+  }
 }
 ```
 
-#### 3.2 Intent Message
-
-Sent after LLM parses the intent.
+#### error
 
 ```json
-{
-  "type": "intent",
-  "content": "Action: turn_on, Device: living_room_lights, Brightness: 100",
-  "intent": {
-    "action": "turn_on",
-    "device": "living_room_lights",
-    "parameters": {
-      "brightness": 100
-    }
-  },
-  "request_id": "req-xyz789",
-  "timestamp": "2026-01-19T10:30:02Z"
-}
-```
-
-#### 3.3 Execution Message
-
-Sent after MCP command is executed.
-
-```json
-{
-  "type": "execution",
-  "content": "Living room lights turned on",
-  "status": "success",
-  "request_id": "req-xyz789",
-  "timestamp": "2026-01-19T10:30:03Z"
-}
-```
-
-#### 3.4 Error Message
-
-Sent when an error occurs during processing.
-
-```json
-{
-  "type": "error",
-  "content": "Failed to parse intent: ambiguous command",
-  "error_code": "INTENT_PARSE_ERROR",
-  "request_id": "req-xyz789",
-  "timestamp": "2026-01-19T10:30:02Z"
-}
-```
-
-#### 3.5 Status Message
-
-Sent for general status updates (e.g., device state changes).
-
-```json
-{
-  "type": "status",
-  "content": "Bedroom lights turned off by another user",
-  "device_id": "device_67890",
-  "timestamp": "2026-01-19T10:32:00Z"
-}
+{ "type": "error", "code": "PROCESSING_ERROR", "message": "..." }
 ```
 
 ---
 
 ### Message Types (Client → Server)
 
-#### 3.6 Ping Message
+#### audio-start
 
-Keep-alive message to maintain connection.
+Starts an audio capture session.
 
 ```json
-{
-  "type": "ping",
-  "timestamp": "2026-01-19T10:30:00Z"
-}
+{ "type": "audio-start" }
 ```
 
-**Response:**
+#### audio-chunk
+
+Sends a chunk of base64 audio data.
 
 ```json
-{
-  "type": "pong",
-  "timestamp": "2026-01-19T10:30:00Z"
-}
+{ "type": "audio-chunk", "data": "...base64..." }
+```
+
+#### audio-end
+
+Ends the audio capture session and triggers processing.
+
+```json
+{ "type": "audio-end" }
+```
+
+#### clarification-choice
+
+Sends the selected candidate index from `clarification-required`.
+
+```json
+{ "type": "clarification-choice", "choiceIndex": 0 }
+```
+
+#### ping / pong
+
+```json
+{ "type": "ping" }
 ```
 
 ---
@@ -640,11 +669,9 @@ Custom error codes in response body:
 
 | Endpoint | Limit | Window |
 |----------|-------|--------|
-| `/api/v1/voice` | 30 requests | Per minute per device |
-| `/api/v1/chat` | 60 requests | Per minute per device |
-| `/api/v1/devices` | 120 requests | Per minute per device |
-| `/api/v1/status` | 120 requests | Per minute per device |
-| `/api/v1/auth/login` | 10 requests | Per minute per IP |
+| `/api/v1/voice/process` | 30 requests | Per minute per device |
+| `/api/v1/voice/process-text` | 60 requests | Per minute per device |
+| `/api/v1/auth/token` | 10 requests | Per minute per IP |
 
 ### Rate Limit Headers
 

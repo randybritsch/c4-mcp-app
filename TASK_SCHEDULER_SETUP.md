@@ -1,8 +1,20 @@
-# C4 Voice Control - Task Scheduler Setup Guide
+# C4 Voice Control - Auto-Start Setup Guide
+
+This document is **legacy** for the pre-Docker deployment.
+
+Current reference deployment runs in **Synology Container Manager (Compose project)**, where auto-start is handled by the Project/Container restart policy.
 
 ## Auto-Start Server on Boot
 
-### Method 1: DSM Task Scheduler (Recommended)
+### Recommended: Synology Container Manager (Compose)
+
+1. DSM → **Container Manager → Projects**
+2. Open your project (e.g. `c4-voice`)
+3. Ensure the project is set to start on boot (and containers have an always/on-failure restart policy)
+4. Verify health:
+   - `curl http://192.168.1.237:3002/api/v1/health`
+
+### Legacy Method: DSM Task Scheduler
 
 1. **Open Task Scheduler**
    - Log in to DSM
@@ -28,7 +40,7 @@
 4. **Save and Test**
    - Click **OK** to save
    - Right-click the task > **Run** to test
-   - Wait 10 seconds, then check: `curl http://192.168.1.237:3001/api/v1/health`
+   - Wait 10 seconds, then check: `curl http://192.168.1.237:3002/api/v1/health`
 
 ### Method 2: Manual Script (Alternative)
 
@@ -50,7 +62,7 @@ Then in Task Scheduler, use:
 ssh randybritsch@192.168.1.237 "ps aux | grep 'node src/server.js'"
 
 # Check health endpoint
-curl http://192.168.1.237:3001/api/v1/health
+curl http://192.168.1.237:3002/api/v1/health
 
 # View logs
 ssh randybritsch@192.168.1.237 "tail -f /tmp/c4-mcp-app-logs/backend.log"
@@ -64,8 +76,8 @@ ssh randybritsch@192.168.1.237 "pkill -f 'node src/server.js'"
 
 ## Current Status
 
-✅ Server running on port 3001
-✅ Health endpoint responding: http://192.168.1.237:3001/api/v1/health
+✅ Server running on port 3002
+✅ Health endpoint responding: http://192.168.1.237:3002/api/v1/health
 ⏳ Auto-start not yet configured
 ⏳ API keys not yet added
 ⏳ Frontend not yet deployed

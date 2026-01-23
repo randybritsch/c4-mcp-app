@@ -223,15 +223,15 @@ Week 8+:   Enhancements & Maintenance
 
 **Tasks:**
 
-- [ ] Set up Express.js server
-- [ ] Implement `/api/v1/voice` endpoint
-- [ ] Implement `/api/v1/chat` endpoint
-- [ ] Integrate Google Speech-to-Text API
-- [ ] Integrate OpenAI GPT-4 API
-- [ ] Build MCP client module
-- [ ] Implement WebSocket server
-- [ ] Add structured logging (Winston)
-- [ ] Write unit tests (Jest)
+- [x] Set up Express.js server
+- [x] Implement `/api/v1/voice/process` endpoint
+- [x] Implement `/api/v1/voice/process-text` endpoint
+- [ ] Integrate Google/Azure Speech-to-Text API (prod keys)
+- [x] Integrate OpenAI (tested with `gpt-4o-mini`)
+- [x] Build `c4-mcp` client module
+- [x] Implement WebSocket server (`/ws`)
+- [x] Add structured logging
+- [x] Write unit tests (Jest)
 
 **Estimate:** 2 weeks  
 **Dependencies:** Cloud API access
@@ -250,8 +250,8 @@ Week 8+:   Enhancements & Maintenance
 
 **Tasks:**
 
-- [ ] Document MCP server API (endpoints, auth, payloads)
-- [ ] Implement MCP client (replace mock)
+- [x] Document MCP server API (endpoints, auth, payloads)
+- [x] Implement MCP client (`c4-mcp` HTTP)
 - [ ] Map user-friendly device names to Control4 IDs
 - [ ] Implement device discovery endpoint
 - [ ] Implement status query endpoint
@@ -277,8 +277,8 @@ Week 8+:   Enhancements & Maintenance
 
 - [ ] Set up Let's Encrypt on Synology
 - [ ] Configure Synology Reverse Proxy (HTTPS, WebSocket)
-- [ ] Implement JWT authentication
-- [ ] Create `/api/v1/auth/login` endpoint
+- [x] Implement JWT authentication
+- [x] Create `/api/v1/auth/token` endpoint
 - [ ] Add auth middleware to protected endpoints
 - [ ] Store tokens securely in PWA
 - [ ] Test token expiry and renewal
@@ -301,7 +301,7 @@ Week 8+:   Enhancements & Maintenance
 **Tasks:**
 
 - [ ] Create deployment script (`deploy.sh`)
-- [ ] Configure Task Scheduler for backend auto-start
+- [x] Deploy via Synology Container Manager (Compose project)
 - [ ] Set up health check endpoint
 - [ ] Create health check cron job
 - [ ] Set up email alerts for failures
@@ -412,7 +412,7 @@ Week 8+:   Enhancements & Maintenance
 
 **Contingency:**
 
-- If costs too high, switch to cheaper LLM (e.g., GPT-3.5 instead of GPT-4)
+- If costs too high, switch to a cheaper OpenAI model (e.g., keep `gpt-4o-mini` rather than larger GPT-4-class models)
 - Or: Reduce STT quality (use faster, cheaper tier)
 
 ---

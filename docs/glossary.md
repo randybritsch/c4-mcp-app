@@ -57,7 +57,7 @@ A Synology DSM package for hosting websites and web applications. Used to serve 
 
 A Synology DSM feature that routes incoming HTTPS requests to internal services. Configured to:
 - Route `/` to Web Station (PWA)
-- Route `/api/*` to Backend Service (port 3001)
+- Route `/api/*` to Backend Service (port 3002)
 - Terminate SSL/TLS (Let's Encrypt certificates)
 - Support WebSocket connections
 
@@ -87,7 +87,7 @@ The process of converting spoken audio into text. This project uses cloud-based 
 
 ### LLM (Large Language Model)
 
-A type of AI model (e.g., GPT-4, Claude) trained on massive text datasets. Used to understand natural language commands and extract structured intents (action, device, parameters).
+A type of AI model (e.g., OpenAI `gpt-4o-mini`) trained on massive text datasets. Used to understand natural language commands and extract structured intents (action, device, parameters).
 
 ### WebSocket
 
@@ -258,7 +258,7 @@ The data transmitted in an HTTP request or response body (typically JSON).
 
 ### Endpoint
 
-A specific URL path on an API that performs a specific function (e.g., `/api/v1/voice`).
+A specific URL path on an API that performs a specific function (e.g., `/api/v1/voice/process`).
 
 ### Mock / Stub
 
@@ -322,7 +322,7 @@ The local computer or server (IP address `127.0.0.1`). Used for development and 
 
 ### Port
 
-A numbered endpoint for network connections (e.g., port 3001 for backend service, port 443 for HTTPS).
+A numbered endpoint for network connections (e.g., port 3002 for backend service, port 443 for HTTPS).
 
 ---
 

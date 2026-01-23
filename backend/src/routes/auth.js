@@ -27,6 +27,10 @@ router.post('/token', (req, res) => {
     issuedAt: new Date().toISOString(),
   });
 
+  const rawExpiry = process.env.JWT_EXPIRY;
+  const expiry = rawExpiry === undefined || rawExpiry === null ? '' : String(rawExpiry).trim();
+  const expiryDisabled = !expiry || ['0', 'none', 'never', 'false'].includes(expiry.toLowerCase());
+
   logger.info('Token generated', {
     correlationId: req.correlationId,
     deviceId,
@@ -35,7 +39,7 @@ router.post('/token', (req, res) => {
 
   res.json({
     token,
-    expiresIn: '7 days',
+    expiresIn: expiryDisabled ? 'never' : expiry,
   });
 });
 
