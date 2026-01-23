@@ -214,7 +214,7 @@ async function handleClarificationChoice(ws, message) {
     return;
   }
 
-  const mcpResult = await mcpClient.sendCommand(refinedIntent, ws.correlationId);
+  const mcpResult = await mcpClient.sendCommand(refinedIntent, ws.correlationId, ws.user?.deviceId);
   if (mcpResult && mcpResult.clarification) {
     ws.pendingClarification = {
       transcript,
@@ -312,7 +312,7 @@ async function processAudioStream(ws) {
       stage: 'executing',
     }));
 
-    const mcpResult = await mcpClient.sendCommand(intent, ws.correlationId);
+    const mcpResult = await mcpClient.sendCommand(intent, ws.correlationId, ws.user?.deviceId);
 
     if (mcpResult && mcpResult.clarification) {
       ws.pendingClarification = {

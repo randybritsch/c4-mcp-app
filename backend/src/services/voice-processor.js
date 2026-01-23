@@ -7,7 +7,7 @@ const { AppError, ErrorCodes } = require('../utils/errors');
 /**
  * Process voice command through full pipeline: STT → LLM → MCP
  */
-async function processVoiceCommand(audioData, format, correlationId) {
+async function processVoiceCommand(audioData, format, correlationId, sessionId) {
   const startTime = Date.now();
 
   try {
@@ -29,7 +29,7 @@ async function processVoiceCommand(audioData, format, correlationId) {
 
     // Step 3: Execute tool call via c4-mcp (HTTP)
     logger.info('Step 3: Executing MCP command', { correlationId });
-    const mcpResult = await mcpClient.sendCommand(plan, correlationId);
+    const mcpResult = await mcpClient.sendCommand(plan, correlationId, sessionId);
 
     const totalDuration = Date.now() - startTime;
 

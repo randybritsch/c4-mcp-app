@@ -30,7 +30,7 @@ router.post('/process', authMiddleware, async (req, res, next) => {
       audioSize: audioData.length,
     });
 
-    const result = await processVoiceCommand(audioData, format, req.correlationId);
+    const result = await processVoiceCommand(audioData, format, req.correlationId, req.user.deviceId);
 
     res.json(result);
   } catch (error) {
@@ -66,7 +66,7 @@ router.post('/process-text', authMiddleware, async (req, res, next) => {
     const mcpClient = require('../services/mcp-client');
 
     const plan = await parseIntent(transcript, req.correlationId);
-    const command = await mcpClient.sendCommand(plan, req.correlationId);
+    const command = await mcpClient.sendCommand(plan, req.correlationId, req.user.deviceId);
 
     res.json({
       transcript,

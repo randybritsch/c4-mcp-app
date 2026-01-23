@@ -18,6 +18,25 @@ class App {
 
     this.commandHistory = [];
     this.isRecording = false;
+
+    this._executionTimeoutId = null;
+  }
+
+  _clearExecutionTimeout() {
+    if (this._executionTimeoutId) {
+      clearTimeout(this._executionTimeoutId);
+      this._executionTimeoutId = null;
+    }
+  }
+
+  _startExecutionTimeout() {
+    this._clearExecutionTimeout();
+    // If we never receive command-complete / clarification-required / error,
+    // avoid leaving the UI stuck in an "executing" state forever.
+    this._executionTimeoutId = setTimeout(() => {
+      this._executionTimeoutId = null;
+      this.showError('Timed out while executing. Please try again.');
+    }, 20000);
   }
 
   /**
@@ -64,6 +83,7 @@ class App {
       this.updateStatus('offline', 'Disconnected');
       this.elements.recordBtn.disabled = true;
       this.showError('Connection lost. Reconnecting...');
+      this._clearExecutionTimeout();
     });
 
     wsClient.on('reconnect-failed', () => {
@@ -76,6 +96,9 @@ class App {
 
     wsClient.on('processing', (message) => {
       this.updateStatusMessage(`Processing: ${message.stage}...`);
+      if (message.stage === 'executing') {
+        this._startExecutionTimeout();
+      }
     });
 
     wsClient.on('transcript', (message) => {
@@ -87,14 +110,17 @@ class App {
     });
 
     wsClient.on('command-complete', (message) => {
+      this._clearExecutionTimeout();
       this.handleCommandComplete(message);
     });
 
     wsClient.on('clarification-required', (message) => {
+      this._clearExecutionTimeout();
       this.handleClarificationRequired(message);
     });
 
     wsClient.on('error', (message) => {
+      this._clearExecutionTimeout();
       this.showError(message.message || 'An error occurred');
       if (this.isRecording) {
         this.stopRecording();

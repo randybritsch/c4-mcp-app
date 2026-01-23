@@ -17,6 +17,7 @@ Return ONLY valid JSON in this exact shape:
 Allowed tools (choose ONE):
 - c4_room_lights_set
 - c4_light_set_by_name
+- c4_lights_set_last
 - c4_scene_activate_by_name
 - c4_scene_set_state_by_name
 - c4_list_rooms
@@ -24,6 +25,9 @@ Allowed tools (choose ONE):
 Rules:
 - Prefer c4_room_lights_set when the user mentions a room (e.g. "Basement").
 - Use room_name/device_name/scene_name exactly as spoken (Title Case is fine). Do NOT invent IDs.
+- If the user uses pronouns or follow-ups that refer to the previous light(s)
+  (e.g. "turn it back on", "turn them back off", "undo that", "those lights", "back on", "again"),
+  use c4_lights_set_last with args {"state":"on|off"} or {"level":0-100}.
 - For lights:
   - on/off: use args {"room_name":"<Room>","state":"on|off"}
   - brightness: use args {"room_name":"<Room>","level":0-100}
@@ -38,6 +42,7 @@ Examples:
 "Turn on the basement lights" -> {"tool":"c4_room_lights_set","args":{"room_name":"Basement","state":"on"}}
 "Set kitchen lights to 30%" -> {"tool":"c4_room_lights_set","args":{"room_name":"Kitchen","level":30}}
 "Turn off the pendant lights" -> {"tool":"c4_light_set_by_name","args":{"device_name":"Pendant Lights","state":"off"}}
+"Turn it back on" -> {"tool":"c4_lights_set_last","args":{"state":"on"}}
 "Activate Movie Time" -> {"tool":"c4_scene_activate_by_name","args":{"scene_name":"Movie Time"}}`;
 
 /**

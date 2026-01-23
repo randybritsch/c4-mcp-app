@@ -122,9 +122,14 @@ class MCPClient {
     const defaultAllow = new Set([
       'c4_room_lights_set',
       'c4_light_set_by_name',
+      'c4_lights_set_last',
       'c4_scene_activate_by_name',
       'c4_scene_set_state_by_name',
       'c4_list_rooms',
+      // Useful for debugging/ops; safe by default.
+      'c4_memory_get',
+      'c4_memory_clear',
+      'c4_lights_get_last',
     ]);
 
     const csv = (process.env.MCP_TOOL_ALLOWLIST || '').trim();
@@ -153,7 +158,7 @@ class MCPClient {
     }
   }
 
-  async _fetchJson(url, options, correlationId) {
+  async _fetchJson(url, options, correlationId, sessionId) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), this._timeoutMs());
 
@@ -164,6 +169,7 @@ class MCPClient {
         headers: {
           ...(options && options.headers ? options.headers : {}),
           'Content-Type': 'application/json',
+          ...(sessionId ? { 'X-Session-Id': String(sessionId) } : {}),
         },
       });
 
@@ -210,10 +216,10 @@ class MCPClient {
 
   async listTools(correlationId) {
     const url = `${this._baseUrl()}/mcp/list`;
-    return this._fetchJson(url, { method: 'GET' }, correlationId);
+    return this._fetchJson(url, { method: 'GET' }, correlationId, null);
   }
 
-  async callTool(toolName, args, correlationId) {
+  async callTool(toolName, args, correlationId, sessionId) {
     this._assertToolAllowed(toolName);
     const url = `${this._baseUrl()}/mcp/call`;
     const body = {
@@ -228,13 +234,14 @@ class MCPClient {
         body: JSON.stringify(body),
       },
       correlationId,
+      sessionId,
     );
   }
 
   /**
    * Send command to Control4 via MCP
    */
-  async sendCommand(intent, correlationId) {
+  async sendCommand(intent, correlationId, sessionId) {
     if (!intent || typeof intent !== 'object') {
       throw new AppError(
         ErrorCodes.USER_INPUT_ERROR,
@@ -254,7 +261,7 @@ class MCPClient {
         args,
       });
 
-      const result = await this.callTool(toolName, args, correlationId);
+      const result = await this.callTool(toolName, args, correlationId, sessionId);
       const clarification = this._extractAmbiguity(toolName, args, result);
       if (clarification) {
         return {
@@ -295,7 +302,7 @@ class MCPClient {
       translated,
     });
 
-    const result = await this.callTool(translated.tool, translated.args, correlationId);
+    const result = await this.callTool(translated.tool, translated.args, correlationId, sessionId);
     return {
       success: true,
       tool: translated.tool,
