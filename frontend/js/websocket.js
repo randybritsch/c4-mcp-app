@@ -4,6 +4,7 @@ class WebSocketClient {
     this.ws = null;
     this.token = null;
     this.connected = false;
+    this.lastError = null;
     this.reconnectAttempts = 0;
     this.maxReconnectAttempts = 5;
     this.reconnectDelay = 1000;
@@ -21,9 +22,34 @@ class WebSocketClient {
 
     return new Promise((resolve, reject) => {
       const wsUrl = `${CONFIG.WS_URL}?token=${this.token}`;
-      this.ws = new WebSocket(wsUrl);
+      let settled = false;
+
+      const fail = (err) => {
+        if (settled) return;
+        settled = true;
+        const error = err instanceof Error ? err : new Error(String(err || 'WebSocket connection failed'));
+        this.lastError = error;
+        reject(error);
+      };
+
+      const connectTimeoutMs = 8000;
+      const timeoutId = setTimeout(() => {
+        fail(new Error(`WebSocket connect timeout after ${connectTimeoutMs}ms (${wsUrl})`));
+        try { this.ws && this.ws.close(); } catch { /* ignore */ }
+      }, connectTimeoutMs);
+
+      try {
+        this.ws = new WebSocket(wsUrl);
+      } catch (e) {
+        clearTimeout(timeoutId);
+        fail(e);
+        return;
+      }
 
       this.ws.onopen = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
         console.log('WebSocket connected');
         this.connected = true;
         this.reconnectAttempts = 0;
@@ -41,14 +67,26 @@ class WebSocketClient {
       };
 
       this.ws.onerror = (error) => {
+        // Note: browsers often provide a generic Event here.
         console.error('WebSocket error:', error);
+        if (!settled) {
+          clearTimeout(timeoutId);
+          fail(new Error(`WebSocket error while connecting (${wsUrl})`));
+          return;
+        }
+        this.lastError = error;
         this.emit('error', error);
       };
 
-      this.ws.onclose = () => {
+      this.ws.onclose = (evt) => {
         console.log('WebSocket disconnected');
         this.connected = false;
-        this.emit('disconnected');
+        if (!settled) {
+          clearTimeout(timeoutId);
+          fail(new Error(`WebSocket closed before open (code ${evt && evt.code}, reason ${evt && evt.reason})`));
+          return;
+        }
+        this.emit('disconnected', evt);
         this.attemptReconnect();
       };
     });
@@ -59,7 +97,8 @@ class WebSocketClient {
    */
   async authenticate() {
     try {
-      const response = await fetch(`${CONFIG.API_URL}/api/v1/auth/token`, {
+      const url = `${CONFIG.API_URL}/api/v1/auth/token`;
+      const response = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -69,15 +108,21 @@ class WebSocketClient {
       });
 
       if (!response.ok) {
-        throw new Error('Authentication failed');
+        let body = '';
+        try { body = await response.text(); } catch { /* ignore */ }
+        throw new Error(`Authentication failed (${response.status})${body ? `: ${body}` : ''}`);
       }
 
       const data = await response.json();
       this.token = data.token;
       localStorage.setItem('authToken', this.token);
     } catch (error) {
+      const url = `${CONFIG.API_URL}/api/v1/auth/token`;
       console.error('Authentication error:', error);
-      throw error;
+      const msg = error && error.message ? error.message : String(error);
+      const wrapped = new Error(`Auth request failed to ${url}: ${msg}`);
+      this.lastError = wrapped;
+      throw wrapped;
     }
   }
 

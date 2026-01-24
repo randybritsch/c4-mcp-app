@@ -76,7 +76,11 @@ LOG_LEVEL=info
 ```bash
 STT_PROVIDER=google
 GOOGLE_STT_API_KEY=<YOUR-GOOGLE-API-KEY>
+STT_TIMEOUT_MS=15000
 ```
+
+**Notes:**
+- `STT_TIMEOUT_MS` bounds the outbound STT request to prevent indefinite hangs.
 
 **How to get Google STT API Key:**
 1. Go to [Google Cloud Console](https://console.cloud.google.com/)
@@ -122,7 +126,11 @@ AZURE_STT_REGION=<YOUR-REGION>  # e.g., eastus, westus2, westeurope
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-proj-<YOUR-OPENAI-API-KEY>
 OPENAI_MODEL=gpt-4o-mini
+LLM_TIMEOUT_MS=15000
 ```
+
+**Notes:**
+- `LLM_TIMEOUT_MS` bounds the outbound LLM request to prevent indefinite hangs.
 
 **How to get OpenAI API Key:**
 1. Go to [OpenAI Platform](https://platform.openai.com/)
@@ -176,11 +184,13 @@ LOG_LEVEL=info
 # Speech-to-Text (choose one)
 STT_PROVIDER=google
 GOOGLE_STT_API_KEY=AIzaSyC1x2y3z4a5b6c7d8e9f0g1h2i3j4k5l6m
+STT_TIMEOUT_MS=15000
 
 # LLM Intent Parsing (choose one)
 LLM_PROVIDER=openai
 OPENAI_API_KEY=sk-proj-abcdefghijklmnopqrstuvwxyz1234567890
 OPENAI_MODEL=gpt-4o-mini
+LLM_TIMEOUT_MS=15000
 
 # Control4 MCP (c4-mcp HTTP server)
 C4_MCP_BASE_URL=http://c4-mcp:3333

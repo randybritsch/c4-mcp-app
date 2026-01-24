@@ -210,12 +210,12 @@ c4-mcp-app/
 |----------|-------|
 | **Name** | MCP Client |
 | **Purpose** | Translate intents to `c4-mcp` HTTP tool calls for Control4 |
-| **Inputs** | Structured intent objects (action, device, parameters) |
-| **Outputs** | `c4-mcp` call payloads, status confirmations |
+| **Inputs** | Structured tool plans (`{ tool, args }`), correlationId, and a stable session id (deviceId) |
+| **Outputs** | `c4-mcp` tool call responses, ambiguity/clarification candidates |
 | **Boundaries** | Stateless command translator; no business logic |
 | **Upstream** | Backend Service (LLM output) |
 | **Downstream** | MCP Server |
-| **Key Technologies** | MCP SDK, JSON serialization |
+| **Key Technologies** | HTTP fetch client, JSON serialization |
 
 ### 4.4 Cloud Integration Module
 
@@ -252,56 +252,51 @@ c4-mcp-app/
 **Voice Input Request:**
 ```json
 {
-  "audio": "base64-encoded-audio-blob",
-  "format": "webm|wav|mp3",
-  "duration_ms": 3500,
-  "device_id": "uuid",
-  "timestamp": "2026-01-19T10:30:00Z"
+  "audioData": "base64-encoded-audio-blob",
+  "format": "webm"
 }
 ```
 
 **Chat Input Request:**
 ```json
 {
-  "message": "Turn on the living room lights",
-  "device_id": "uuid",
-  "timestamp": "2026-01-19T10:30:00Z"
+  "transcript": "Turn on the living room lights"
 }
 ```
 
 **Intent Object (LLM Output):**
 ```json
 {
-  "action": "turn_on|turn_off|set_temperature|lock|unlock",
-  "device": "living_room_lights",
-  "parameters": {
-    "brightness": 80,
-    "color": "warm_white"
-  },
-  "confidence": 0.95
-}
-```
-
-**MCP Command (Control4 Protocol):**
-```json
-{
-  "type": "command",
-  "target": "device_id_12345",
-  "action": "set_state",
-  "params": {
-    "state": "on",
-    "brightness": 80
+  "tool": "c4_room_lights_set",
+  "args": {
+    "room_name": "Living Room",
+    "state": "on"
   }
 }
 ```
 
+**MCP Tool Call (Backend → c4-mcp HTTP):**
+```json
+{
+  "kind": "tool",
+  "name": "c4_room_lights_set",
+  "args": {
+    "room_name": "Living Room",
+    "state": "on"
+  }
+}
+```
+
+Session context is provided to `c4-mcp` via the `X-Session-Id` request header (the backend uses the deviceId) so follow-ups can be resolved using `c4_lights_set_last`.
+
 **WebSocket Response Stream:**
 ```json
 {
-  "type": "status|transcript|intent|execution|error",
-  "content": "Turning on living room lights...",
-  "timestamp": "2026-01-19T10:30:01Z",
-  "status": "success|pending|error"
+  "type": "connected|processing|transcript|intent|command-complete|clarification-required|error",
+  "stage": "transcription|intent-parsing|executing",
+  "correlationId": "c-...",
+  "message": "...",
+  "timestamp": "2026-01-19T10:30:01Z"
 }
 ```
 
@@ -344,14 +339,15 @@ c4-mcp-app/
 ```json
 Request:
 {
-  "text": "Set bedroom temperature to 72 degrees"
+  "transcript": "Turn on the basement lights"
 }
 
 Response:
 {
-  "request_id": "req-xyz789",
-  "status": "processing",
-  "message": "Command received and processing"
+  "transcript": "Turn on the basement lights",
+  "plan": { "tool": "c4_room_lights_set", "args": { "room_name": "Basement", "state": "on" } },
+  "command": { "success": true },
+  "timestamp": "2026-01-23T12:34:56.000Z"
 }
 ```
 

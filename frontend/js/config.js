@@ -49,11 +49,20 @@ function getOverrides() {
 // Configuration
 const overrides = getOverrides();
 
-// Reference deployment (Synology Container Manager): backend exposed on port 3002.
-// For local development with `npm start` (default port 3000), use `?backend=http://localhost:3000`.
-const defaultApiUrl = window.location.hostname === 'localhost'
+// Default backend selection:
+// - If the UI is served over HTTPS, default to the NAS reverse-proxy HTTPS port (avoids mixed content).
+// - Otherwise, default to the direct backend port (e.g., Synology Container Manager port mapping).
+// You can always override with:
+// - `?backend=https://192.168.1.237:4443`
+// - `localStorage.c4_api_url = 'https://192.168.1.237:4443'`
+const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+const isHttpsPage = window.location.protocol === 'https:';
+
+const defaultApiUrl = isLocalhost
   ? 'http://localhost:3002'
-  : `http://${window.location.hostname}:3002`;
+  : (isHttpsPage
+    ? `https://${window.location.hostname}:4443`
+    : `http://${window.location.hostname}:3002`);
 
 const apiUrl = (overrides.apiUrl || defaultApiUrl).replace(/\/+$/, '');
 const wsUrl = (overrides.wsUrl || deriveWsUrlFromApiUrl(apiUrl)).replace(/\/+$/, '');

@@ -15,6 +15,7 @@ const config = {
   // Speech-to-Text
   stt: {
     provider: process.env.STT_PROVIDER || 'google',
+    timeoutMs: parseInt(process.env.STT_TIMEOUT_MS, 10) || 15000,
     google: {
       apiKey: process.env.GOOGLE_STT_API_KEY,
     },
@@ -27,6 +28,7 @@ const config = {
   // LLM
   llm: {
     provider: process.env.LLM_PROVIDER || 'openai',
+    timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS, 10) || 15000,
     openai: {
       apiKey: process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',

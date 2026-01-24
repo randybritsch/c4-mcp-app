@@ -46,12 +46,36 @@ class MCPClient {
       .filter((c) => c && c.name);
 
     // Determine what we're disambiguating for UI copy.
-    const kind = toolName.startsWith('c4_room_') ? 'room' : toolName.startsWith('c4_light_') ? 'light' : 'choice';
+    // For TV/media flows we infer based on candidate shape + tool.
+    const hasDeviceIds = candidates.some((c) => c && c.device_id);
+    const hasRoomIds = candidates.some((c) => c && (c.room_id !== null && c.room_id !== undefined));
+
+    const isTvWatchByName = toolName === 'c4_tv_watch_by_name';
+    const isMediaWatchLaunchByName = toolName === 'c4_media_watch_launch_app_by_name';
+    const isRoomListenByName = toolName === 'c4_room_listen_by_name';
+
+    const kind = (isTvWatchByName || isMediaWatchLaunchByName)
+      ? (hasDeviceIds ? 'device' : 'room')
+      : isRoomListenByName
+        ? (hasRoomIds ? 'room' : 'device')
+        : toolName.startsWith('c4_room_')
+          ? 'room'
+          : toolName.startsWith('c4_light_')
+            ? 'light'
+            : (hasRoomIds && !hasDeviceIds)
+              ? 'room'
+              : 'choice';
+
     const query = kind === 'room'
       ? (args && typeof args.room_name === 'string' ? args.room_name : null)
       : kind === 'light'
         ? (args && typeof args.device_name === 'string' ? args.device_name : null)
-        : null;
+        : kind === 'device'
+          ? (
+            (args && typeof args.source_device_name === 'string' ? args.source_device_name : null)
+            || (args && typeof args.device_name === 'string' ? args.device_name : null)
+          )
+          : null;
 
     return {
       kind,
@@ -95,6 +119,61 @@ class MCPClient {
       return { tool, args };
     }
 
+    if (tool === 'c4_tv_watch_by_name') {
+      // Room disambiguation: carry room_id forward so the MCP tool skips name resolution.
+      if (choice.room_id !== null && choice.room_id !== undefined) {
+        args.room_id = this._asIntOrNull(choice.room_id);
+        if (choice.room_name) {
+          args.room_name = String(choice.room_name);
+        }
+      }
+
+      // Device disambiguation: update the device name (resolved by-name, but scoped to room).
+      // Control4 candidates usually include the exact device name, which should make resolution unique.
+      if (choice.device_id && choice.name) {
+        args.source_device_name = String(choice.name);
+      }
+
+      return { tool, args };
+    }
+
+    if (tool === 'c4_media_watch_launch_app_by_name') {
+      // Room disambiguation: carry room_id forward so the tool can scope device resolution.
+      if (choice.room_id !== null && choice.room_id !== undefined) {
+        args.room_id = this._asIntOrNull(choice.room_id);
+        // For room candidates, name is typically the room name.
+        if (choice.name) {
+          args.room_name = String(choice.name);
+        } else if (choice.room_name) {
+          args.room_name = String(choice.room_name);
+        }
+      }
+
+      // Device disambiguation: update device_name to the chosen device name.
+      if (choice.device_id && choice.name) {
+        args.device_name = String(choice.name);
+      }
+
+      return { tool, args };
+    }
+
+    if (tool === 'c4_room_listen_by_name') {
+      // Room disambiguation: carry room_id forward so the MCP tool skips name resolution.
+      if (choice.room_id !== null && choice.room_id !== undefined) {
+        args.room_id = this._asIntOrNull(choice.room_id);
+        if (choice.name) {
+          args.room_name = String(choice.name);
+        }
+      }
+
+      // Listen source disambiguation: update the source name.
+      if (choice.name) {
+        args.source_device_name = String(choice.name);
+      }
+
+      return { tool, args };
+    }
+
     // Scenes: keep as-is for now.
     return { tool, args };
   }
@@ -123,13 +202,27 @@ class MCPClient {
       'c4_room_lights_set',
       'c4_light_set_by_name',
       'c4_lights_set_last',
+      // TV / Media
+      'c4_tv_watch_by_name',
+      'c4_tv_off',
+      'c4_tv_off_last',
+      'c4_tv_remote',
+      'c4_tv_remote_last',
+      'c4_media_watch_launch_app_by_name',
       'c4_scene_activate_by_name',
       'c4_scene_set_state_by_name',
+      'c4_room_listen_by_name',
       'c4_list_rooms',
+      // Read-only inventory/state tools used for follow-up memory validation.
+      'c4_list_devices',
+      'c4_find_devices',
+      'c4_resolve_device',
+      'c4_light_get_state',
       // Useful for debugging/ops; safe by default.
       'c4_memory_get',
       'c4_memory_clear',
       'c4_lights_get_last',
+      'c4_tv_get_last',
     ]);
 
     const csv = (process.env.MCP_TOOL_ALLOWLIST || '').trim();

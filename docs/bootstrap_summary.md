@@ -13,6 +13,8 @@ Provide a lightweight **voice + text UI** for Control4: the backend turns natura
 - **Control4 bridge**: separate `c4-mcp` HTTP server (reference NAS host port: `:3334`, container `:3333`).
 - **Decoupled integration**: backend reaches `c4-mcp` only via `C4_MCP_BASE_URL` (no shared code between repos).
 - **Disambiguation UX**: ambiguous targets emit `clarification-required` → UI prompts → UI sends `clarification-choice` → backend retries.
+  
+**Note:** conversational “memory” lives in `c4-mcp`. The backend provides a stable session identifier (deviceId) to `c4-mcp` via `X-Session-Id` so follow-ups like “turn it back on” can use `c4_lights_set_last`.
 
 **3) Key modules and roles (bullet list)**
 - `backend/src/server.js`: server entrypoint.
@@ -21,7 +23,7 @@ Provide a lightweight **voice + text UI** for Control4: the backend turns natura
 - `backend/src/websocket.js`: WebSocket protocol (audio streaming, status events, clarification state).
 - `backend/src/services/stt.js`: speech-to-text provider integration.
 - `backend/src/services/llm.js`: intent parsing (structured `{ tool, args }`).
-- `backend/src/services/mcp-client.js`: calls `c4-mcp` (`/mcp/list`, `/mcp/call`) and handles ambiguity.
+- `backend/src/services/mcp-client.js`: calls `c4-mcp` (`/mcp/list`, `/mcp/call`), passes `X-Session-Id`, enforces MCP timeouts, and handles ambiguity.
 - `frontend/js/*`: UI logic + WebSocket client + config.
 
 **4) Data & contracts (top 3–5 only)**
@@ -45,12 +47,13 @@ Provide a lightweight **voice + text UI** for Control4: the backend turns natura
 - Prefer `async/await` with explicit error mapping (consistent error codes + HTTP status).
 - Keep the backend↔MCP contract stable (MCP payload shape and clarification schema).
 - Maintain Jest tests and ESLint as regression gates.
+- Keep session context in `c4-mcp` (do not re-implement memory in this repo); always pass a stable session id to MCP.
 
 **7) Current priorities (Top 5)**
 1. Keep deployment unambiguous (avoid mixed old/new backend ports; validate `:3002` is the active build).
 2. Ensure `C4_MCP_BASE_URL` is correct in container/LAN scenarios (`http://c4-mcp:3333` inside compose).
 3. Validate WebSocket + clarification flows end-to-end in production.
-4. Confirm write posture: `c4-mcp` writes enabled only when intended and guardrails enforced.
+4. Eliminate “stuck executing” UX: backend MCP calls must timeout; UI must surface completion/error (watchdog).
 5. Stabilize key management (STT/OpenAI env vars; no secrets in repo).
 
 **8) Open risks/unknowns (Top 5)**
@@ -59,6 +62,11 @@ Provide a lightweight **voice + text UI** for Control4: the backend turns natura
 3. WebSocket stability (mobile roaming, proxy timeouts, reverse-proxy config).
 4. Ambiguity frequency in real homes (common room/device names).
 5. Safety risk if ports are exposed beyond LAN (prefer firewall/VPN; never public internet by default).
+
+**Key env vars (runtime must-haves)**
+- `PORT` (NAS compose maps host `3002` → container `3000`)
+- `C4_MCP_BASE_URL` (inside compose: `http://c4-mcp:3333`)
+- `C4_MCP_TIMEOUT_MS` (prevents indefinite hangs)
 
 **9) Links/paths to full docs**
 - `docs/project_overview.md`

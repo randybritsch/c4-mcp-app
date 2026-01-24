@@ -45,7 +45,7 @@ router.post('/process', authMiddleware, async (req, res, next) => {
  */
 router.post('/process-text', authMiddleware, async (req, res, next) => {
   try {
-    const { transcript } = req.body;
+    const { transcript, plan: planOverride } = req.body;
 
     if (!transcript || typeof transcript !== 'string' || transcript.trim().length === 0) {
       throw new AppError(
@@ -65,7 +65,38 @@ router.post('/process-text', authMiddleware, async (req, res, next) => {
     const { parseIntent } = require('../services/llm');
     const mcpClient = require('../services/mcp-client');
 
-    const plan = await parseIntent(transcript, req.correlationId);
+    let plan;
+    if (planOverride !== undefined && planOverride !== null) {
+      if (!planOverride || typeof planOverride !== 'object') {
+        throw new AppError(
+          ErrorCodes.USER_INPUT_ERROR,
+          'plan must be an object like { tool: string, args: object }',
+          400,
+        );
+      }
+      const { tool } = planOverride;
+      const { args } = planOverride;
+
+      if (!tool || typeof tool !== 'string') {
+        throw new AppError(
+          ErrorCodes.USER_INPUT_ERROR,
+          'plan.tool must be a string',
+          400,
+        );
+      }
+      if (args !== undefined && (args === null || typeof args !== 'object' || Array.isArray(args))) {
+        throw new AppError(
+          ErrorCodes.USER_INPUT_ERROR,
+          'plan.args must be an object',
+          400,
+        );
+      }
+
+      plan = { tool: String(tool), args: args && typeof args === 'object' ? args : {} };
+    } else {
+      plan = await parseIntent(transcript, req.correlationId);
+    }
+
     const command = await mcpClient.sendCommand(plan, req.correlationId, req.user.deviceId);
 
     res.json({

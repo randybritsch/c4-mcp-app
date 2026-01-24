@@ -1,4 +1,4 @@
-const CACHE_NAME = 'c4-voice-v1';
+const CACHE_NAME = 'c4-voice-v3';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -55,6 +55,23 @@ self.addEventListener('fetch', (event) => {
   // Skip WebSocket connections and API calls
   if (event.request.url.includes('/ws') || 
       event.request.url.includes('/api/')) {
+    return;
+  }
+
+  // For navigation/doc requests, prefer network so updates are picked up quickly.
+  // Fall back to cached index.html for offline support.
+  if (event.request.mode === 'navigate' || event.request.destination === 'document') {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          if (response && response.status === 200) {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put('/index.html', responseToCache));
+          }
+          return response;
+        })
+        .catch(() => caches.match('/index.html'))
+    );
     return;
   }
 

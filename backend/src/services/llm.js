@@ -2,6 +2,16 @@ const config = require('../config');
 const { AppError, ErrorCodes } = require('../utils/errors');
 const logger = require('../utils/logger');
 
+async function fetchWithTimeout(url, options, timeoutMs) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), Number(timeoutMs) || 0);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
 /**
  * System prompt for intent parsing
  */
@@ -18,6 +28,10 @@ Allowed tools (choose ONE):
 - c4_room_lights_set
 - c4_light_set_by_name
 - c4_lights_set_last
+- c4_tv_watch_by_name
+- c4_tv_off
+- c4_tv_off_last
+- c4_tv_remote_last
 - c4_scene_activate_by_name
 - c4_scene_set_state_by_name
 - c4_list_rooms
@@ -28,6 +42,26 @@ Rules:
 - If the user uses pronouns or follow-ups that refer to the previous light(s)
   (e.g. "turn it back on", "turn them back off", "undo that", "those lights", "back on", "again"),
   use c4_lights_set_last with args {"state":"on|off"} or {"level":0-100}.
+- If the user refers to the TV/media as a follow-up without specifying a room
+  (e.g. "turn off the TV", "turn it off", "shut it down"), use c4_tv_off_last with args {}.
+- If the user refers to TV/media volume as a follow-up without specifying a room
+- If the user refers to TV/media remote actions as a follow-up without specifying a room/device
+  (e.g. "pause", "play", "mute", "turn down the volume", "up", "select", "back", "menu"),
+  use c4_tv_remote_last and choose ONE of these button values:
+  up, down, left, right, select, ok, enter, back, menu, info, exit, guide,
+  play, pause, ff, rew, recall, prev, page_up, page_down,
+  volume_up, volume_down, volup, voldown, mute,
+  channel_up, channel_down, ch_up, ch_down,
+  power_off, off, room_off.
+  Notes:
+  - "turn down the volume" -> {"button":"volume_down"}
+  - "turn up the volume" -> {"button":"volume_up"}
+  - "mute" -> {"button":"mute"}
+  - "pause" -> {"button":"pause"}
+  - "play" -> {"button":"play"}
+  This tool MUST reuse the last TV/media context from this session (e.g., if the last action was Apple TV in Family Room).
+- To turn on a TV/media source by name, prefer c4_tv_watch_by_name with args
+  {"room_name":"<Room>","source_device_name":"<Source>"}.
 - For lights:
   - on/off: use args {"room_name":"<Room>","state":"on|off"}
   - brightness: use args {"room_name":"<Room>","level":0-100}
@@ -43,6 +77,12 @@ Examples:
 "Set kitchen lights to 30%" -> {"tool":"c4_room_lights_set","args":{"room_name":"Kitchen","level":30}}
 "Turn off the pendant lights" -> {"tool":"c4_light_set_by_name","args":{"device_name":"Pendant Lights","state":"off"}}
 "Turn it back on" -> {"tool":"c4_lights_set_last","args":{"state":"on"}}
+"Turn on Family Room Apple TV" -> {"tool":"c4_tv_watch_by_name","args":{"room_name":"Family Room","source_device_name":"Apple TV"}}
+"Turn off the TV" -> {"tool":"c4_tv_off_last","args":{}}
+"Turn down the volume" -> {"tool":"c4_tv_remote_last","args":{"button":"volume_down"}}
+"Mute it" -> {"tool":"c4_tv_remote_last","args":{"button":"mute"}}
+"Pause" -> {"tool":"c4_tv_remote_last","args":{"button":"pause"}}
+"Play" -> {"tool":"c4_tv_remote_last","args":{"button":"play"}}
 "Activate Movie Time" -> {"tool":"c4_scene_activate_by_name","args":{"scene_name":"Movie Time"}}`;
 
 /**
@@ -149,14 +189,28 @@ async function parseWithOpenAI(transcript, correlationId) {
           : {}),
       };
 
-      const response = await fetch('https://api.openai.com/v1/chat/completions', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ ...basePayload, ...tokenPayload }),
-      });
+      const timeoutMs = config.llm.timeoutMs || 15000;
+      let response;
+      try {
+        response = await fetchWithTimeout('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ ...basePayload, ...tokenPayload }),
+        }, timeoutMs);
+      } catch (err) {
+        if (err && err.name === 'AbortError') {
+          throw new AppError(
+            ErrorCodes.LLM_TIMEOUT,
+            `LLM request timed out after ${timeoutMs}ms`,
+            504,
+            { correlationId, timeoutMs, provider: 'openai' },
+          );
+        }
+        throw err;
+      }
 
       if (!response.ok) {
         let message = 'LLM API error';

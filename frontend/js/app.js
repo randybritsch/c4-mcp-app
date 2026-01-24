@@ -19,7 +19,42 @@ class App {
     this.commandHistory = [];
     this.isRecording = false;
 
+    // When the recorder auto-stops (silence detected), update UI state.
+    if (typeof voiceRecorder !== 'undefined') {
+      voiceRecorder.onAutoStop = () => {
+        this.handleAutoStop();
+      };
+    }
+
     this._executionTimeoutId = null;
+
+    // Make multiline diagnostics readable.
+    if (this.elements.statusMessage) {
+      this.elements.statusMessage.style.whiteSpace = 'pre-wrap';
+    }
+  }
+
+  _formatError(err) {
+    if (!err) return 'Unknown error';
+    if (typeof err === 'string') return err;
+    if (err instanceof Error && err.message) return err.message;
+    try { return JSON.stringify(err); } catch { return String(err); }
+  }
+
+  async _checkBackendHealth() {
+    const url = `${CONFIG.API_URL}/api/v1/health`;
+    try {
+      const resp = await fetch(url, { cache: 'no-store' });
+      const text = await resp.text();
+      if (!resp.ok) {
+        const snippet = text ? text.slice(0, 300) : '';
+        throw new Error(`Health not OK (${resp.status})${snippet ? `: ${snippet}` : ''}`);
+      }
+      return true;
+    } catch (e) {
+      const msg = this._formatError(e);
+      throw new Error(`Health check failed for ${url}: ${msg}`);
+    }
   }
 
   _clearExecutionTimeout() {
@@ -56,12 +91,22 @@ class App {
 
     // Connect to WebSocket
     try {
+      this.updateStatusMessage('Connecting...');
+
+      // Preflight: if this fails on iPhone, it's usually TLS/cert/DNS/port reachability.
+      await this._checkBackendHealth();
+
       await wsClient.connect();
       this.updateStatus('online', 'Connected');
       this.elements.recordBtn.disabled = false;
     } catch (error) {
       console.error('Failed to connect:', error);
-      this.showError('Failed to connect to server');
+      const details = [
+        `Failed to connect: ${this._formatError(error)}`,
+        `API: ${CONFIG.API_URL}`,
+        `WS: ${CONFIG.WS_URL}`,
+      ].join('\n');
+      this.showError(details);
       this.updateStatus('offline', 'Connection Failed');
     }
   }
@@ -153,6 +198,17 @@ class App {
     } catch (error) {
       this.showError('Could not access microphone: ' + error.message);
     }
+  }
+
+  /**
+   * Recorder finished automatically (silence detected).
+   */
+  handleAutoStop() {
+    if (!this.isRecording) return;
+    this.isRecording = false;
+    this.elements.recordBtn.classList.remove('recording');
+    this.elements.recordText.textContent = 'Tap to Speak';
+    this.updateStatusMessage('Processing...');
   }
 
   /**

@@ -125,6 +125,8 @@ async function handleMessage(ws, data) {
     switch (message.type) {
       case 'audio-start':
         ws.audioChunks = [];
+        ws.audioFormat = message.format ? String(message.format) : 'webm';
+        ws.audioSampleRateHertz = Number.isFinite(Number(message.sampleRateHertz)) ? Number(message.sampleRateHertz) : null;
         ws.send(JSON.stringify({
           type: 'audio-ready',
           message: 'Ready to receive audio',
@@ -285,7 +287,9 @@ async function processAudioStream(ws) {
       stage: 'transcription',
     }));
 
-    const sttResult = await transcribeAudio(audioData, 'webm', ws.correlationId);
+    const format = ws.audioFormat ? String(ws.audioFormat) : 'webm';
+    const sampleRateHertz = Number.isFinite(Number(ws.audioSampleRateHertz)) ? Number(ws.audioSampleRateHertz) : undefined;
+    const sttResult = await transcribeAudio(audioData, format, ws.correlationId, sampleRateHertz);
 
     ws.send(JSON.stringify({
       type: 'transcript',
