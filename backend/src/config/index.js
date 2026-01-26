@@ -117,6 +117,9 @@ const config = {
   websocket: {
     maxConnections: parseInt(process.env.WS_MAX_CONNECTIONS, 10) || 10,
     heartbeatInterval: parseInt(process.env.WS_HEARTBEAT_INTERVAL, 10) || 30000,
+    // Optional debug/automation hook: allow sending a transcript directly over WS
+    // (bypasses STT). Off by default.
+    textCommandsEnabled: /^(1|true|yes)$/i.test(String(process.env.WS_TEXT_COMMANDS_ENABLED || '').trim()),
   },
 
   // CORS

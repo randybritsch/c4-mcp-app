@@ -51,6 +51,38 @@ async function handleMessage(ws, data, {
         });
         break;
 
+      case 'text-command': {
+        const config = require('../config');
+        if (!config?.websocket?.textCommandsEnabled) {
+          wsMessages.sendError(ws, {
+            code: 'TEXT_COMMANDS_DISABLED',
+            message: 'text-command is disabled on this server',
+          });
+          break;
+        }
+
+        const transcript = message && typeof message.transcript === 'string'
+          ? message.transcript
+          : '';
+        if (!transcript || transcript.trim().length === 0) {
+          wsMessages.sendError(ws, {
+            code: 'MISSING_TRANSCRIPT',
+            message: 'text-command transcript must be a non-empty string',
+          });
+          break;
+        }
+
+        wsMessages.sendTranscript(ws, transcript, null);
+        await wsAudioPipeline.processTranscript(ws, transcript, {
+          logger,
+          wsMessages,
+          parseIntent,
+          mcpClient,
+          roomAliases,
+        });
+        break;
+      }
+
       case 'clarification-choice':
         await wsClarification.handleClarificationChoice(ws, message, {
           logger,
