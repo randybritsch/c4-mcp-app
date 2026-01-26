@@ -6,6 +6,61 @@ async function processAudioStream(ws, {
   mcpClient,
   roomAliases,
 } = {}) {
+  const shouldAutoResolveRoomGroup = (transcript, originalIntent, clarification) => {
+    if (!transcript || typeof transcript !== 'string') return false;
+    if (!clarification || typeof clarification !== 'object') return false;
+    if (String(clarification.kind || '') !== 'room') return false;
+    if (!Array.isArray(clarification.candidates) || clarification.candidates.length === 0) return false;
+
+    // Only auto-resolve for lights-by-room commands (safe bulk operation).
+    if (!originalIntent || typeof originalIntent !== 'object') return false;
+    if (String(originalIntent.tool || '') !== 'c4_room_lights_set') return false;
+
+    // Heuristics: user asked for a bulk operation ("all"/"every") AND mentions lights.
+    // Keep this conservative to avoid surprising fan-out on unrelated commands.
+    const t = transcript.toLowerCase();
+    const wantsAll = /\b(all|every|everything)\b/.test(t);
+    const mentionsLights = /\b(lights?|lamps?)\b/.test(t);
+    if (!wantsAll || !mentionsLights) return false;
+
+    // Safety cap: avoid blasting too many rooms without explicit confirmation.
+    if (clarification.candidates.length > 12) return false;
+
+    return true;
+  };
+
+  const executeRoomGroup = async (intent, clarification, correlationId, sessionId) => {
+    const perRoomResults = [];
+    for (const choice of clarification.candidates) {
+      const refinedIntent = mcpClient.buildRefinedIntentFromChoice(intent, choice);
+      if (!refinedIntent) continue;
+
+      // eslint-disable-next-line no-await-in-loop
+      const r = await mcpClient.sendCommand(refinedIntent, correlationId, sessionId);
+
+      perRoomResults.push({
+        room_name: choice && choice.name ? String(choice.name) : null,
+        room_id: choice && choice.room_id !== undefined && choice.room_id !== null ? Number(choice.room_id) : null,
+        intent: refinedIntent,
+        result: r,
+      });
+    }
+
+    const anyFailed = perRoomResults.some((x) => !x.result || x.result.success !== true);
+    return {
+      success: !anyFailed,
+      tool: String(intent.tool || 'c4_room_lights_set'),
+      args: intent.args || {},
+      aggregate: {
+        kind: 'room-group',
+        query: clarification.query || (intent.args && intent.args.room_name) || null,
+        count: perRoomResults.length,
+      },
+      results: perRoomResults,
+      timestamp: new Date().toISOString(),
+    };
+  };
+
   if (!ws || !wsMessages || !logger || !transcribeAudio || !parseIntent || !mcpClient || !roomAliases) {
     throw new Error('ws-audio-pipeline: missing dependencies');
   }
@@ -57,6 +112,22 @@ async function processAudioStream(ws, {
     });
 
     if (mcpResult && mcpResult.clarification) {
+      if (shouldAutoResolveRoomGroup(sttResult.transcript, intent, mcpResult.clarification)) {
+        wsMessages.sendProcessing(ws, 'executing');
+
+        const aggregateResult = await executeRoomGroup(
+          intent,
+          mcpResult.clarification,
+          ws.correlationId,
+          ws.user?.deviceId,
+        );
+
+        wsMessages.sendCommandComplete(ws, aggregateResult, sttResult.transcript, intent);
+        ws.pendingClarification = null;
+        ws.audioChunks = [];
+        return;
+      }
+
       ws.pendingClarification = {
         transcript: sttResult.transcript,
         intent,
