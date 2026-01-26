@@ -4,34 +4,33 @@
 **Last Updated:** January 23, 2026
 
 **1) One-line purpose**
-Provide a lightweight **voice + text UI** for Control4: the backend turns natural language into deterministic `c4-mcp` tool calls and streams results to a browser UI over WebSocket.
+Provide a lightweight **voice + text** interface for Control4: a PWA frontend talks to a Node.js backend that converts natural language into deterministic `c4-mcp` tool calls and streams progress/results over WebSocket.
 
 **2) Architecture overview (3–6 bullets)**
-- **Frontend**: PWA static app (`frontend/`) captures audio/text and displays streaming progress.
-- **Backend**: Node.js (Express) REST API + WebSocket server (reference NAS host port: `:3002`).
-- **Cloud AI**: STT (Google/Azure) + OpenAI for intent parsing (default model `gpt-4o-mini`).
-- **Control4 bridge**: separate `c4-mcp` HTTP server (reference NAS host port: `:3334`, container `:3333`).
-- **Decoupled integration**: backend reaches `c4-mcp` only via `C4_MCP_BASE_URL` (no shared code between repos).
-- **Disambiguation UX**: ambiguous targets emit `clarification-required` → UI prompts → UI sends `clarification-choice` → backend retries.
-  
-**Note:** conversational “memory” lives in `c4-mcp`. The backend provides a stable session identifier (deviceId) to `c4-mcp` via `X-Session-Id` so follow-ups like “turn it back on” can use `c4_lights_set_last`.
+- **Frontend (PWA)**: static files in `frontend/` capture mic audio (MediaRecorder or WAV fallback) and render streamed status.
+- **Backend (Node/Express)**: REST API + WebSocket server (container port 3000; NAS commonly exposes host `:3002`).
+- **Cloud AI**: STT (Google/Azure) → transcript; LLM (OpenAI by default) → structured `{ tool, args }` plan.
+- **Control4 bridge**: backend calls a separate `c4-mcp` HTTP server via `C4_MCP_BASE_URL` (no shared code between repos).
+- **Clarification UX**: ambiguous tool results become `clarification-required`; UI replies with `clarification-choice`; backend rebuilds args and retries.
+- **Production routing**: Synology reverse proxy terminates HTTPS/WSS; `/api/*` and `/ws` must support WebSocket upgrade.
 
 **3) Key modules and roles (bullet list)**
-- `backend/src/server.js`: server entrypoint.
-- `backend/src/app.js`: Express app wiring + middleware.
-- `backend/src/routes/*`: REST endpoints (`health`, `auth`, `voice`).
-- `backend/src/websocket.js`: WebSocket protocol (audio streaming, status events, clarification state).
-- `backend/src/services/stt.js`: speech-to-text provider integration.
-- `backend/src/services/llm.js`: intent parsing (structured `{ tool, args }`).
-- `backend/src/services/mcp-client.js`: calls `c4-mcp` (`/mcp/list`, `/mcp/call`), passes `X-Session-Id`, enforces MCP timeouts, and handles ambiguity.
-- `frontend/js/*`: UI logic + WebSocket client + config.
+- `backend/src/server.js`: HTTP + WebSocket server entry.
+- `backend/src/app.js`: Express wiring (middleware, routes, error handling).
+- `backend/src/routes/voice.js`: `/api/v1/voice/process` + `/process-text` pipeline.
+- `backend/src/websocket.js`: WS protocol for streaming stages, transcription, intent, execution, clarification.
+- `backend/src/services/stt.js`: STT providers; supports WAV/PCM inputs for mobile Safari fallback.
+- `backend/src/services/llm.js`: intent parsing to a deterministic plan.
+- `backend/src/services/mcp-client.js`: calls `c4-mcp` (`/mcp/list`, `/mcp/call`), enforces timeouts, passes session headers, maps ambiguity.
+- `frontend/js/voice.js`: voice capture (MediaRecorder + WAV fallback).
+- `frontend/js/websocket.js`: WS client + reconnection and state transitions.
 
 **4) Data & contracts (top 3–5 only)**
-- Voice request: `{ audioData: "<base64>", format?: "webm" }`.
-- Plan: `{ tool: string, args: object }` (LLM output contract).
-- MCP tool call: `{ kind:"tool", name:"<tool>", args:{...} }`.
-- Clarification flow: `clarification-required` → `clarification-choice` (index-based selection).
-- Auth: JWT `Authorization: Bearer <token>` for protected routes and `/ws?token=...`.
+- Auth: `POST /api/v1/auth/token` → JWT; client uses `Authorization: Bearer <token>` and `wss://.../ws?token=...`.
+- Text command: `POST /api/v1/voice/process-text` body `{ transcript: string }` (optionally supports a test `plan` override).
+- Voice command: `POST /api/v1/voice/process` body `{ audioData: base64, format, sampleRateHertz? }`.
+- Plan contract: `{ tool: string, args: object }` (LLM output).
+- Clarification contract: `clarification-required` (candidates) → `clarification-choice` (index) → retry.
 
 **5) APIs (key endpoints only)**
 - `GET /api/v1/health`
@@ -41,32 +40,26 @@ Provide a lightweight **voice + text UI** for Control4: the backend turns natura
 - `POST /api/v1/voice/process-text`
 - WebSocket: `/ws?token=...`
 
-**6) Coding conventions (AI must always follow)**
-- Use environment-driven config (`backend/src/config/index.js`); do not hardcode NAS IPs.
-- Keep logs structured with correlation IDs; avoid logging secrets.
-- Prefer `async/await` with explicit error mapping (consistent error codes + HTTP status).
-- Keep the backend↔MCP contract stable (MCP payload shape and clarification schema).
-- Maintain Jest tests and ESLint as regression gates.
-- Keep session context in `c4-mcp` (do not re-implement memory in this repo); always pass a stable session id to MCP.
+**6) Coding conventions (only the rules the AI must always follow)**
+- Config is env-driven via `backend/src/config/index.js`; never hardcode NAS IPs/ports in code.
+- Preserve the backend↔MCP contract (`/mcp/list`, `/mcp/call` payload shape; ambiguity/clarification mapping).
+- Always pass a stable session id to `c4-mcp` via `X-Session-Id` (use deviceId); don’t re-implement “memory” here.
+- Use consistent structured errors (code + HTTP status) and include correlation IDs in logs.
+- Keep secrets out of logs and out of git; `.env` should remain local-only.
 
 **7) Current priorities (Top 5)**
-1. Keep deployment unambiguous (avoid mixed old/new backend ports; validate `:3002` is the active build).
-2. Ensure `C4_MCP_BASE_URL` is correct in container/LAN scenarios (`http://c4-mcp:3333` inside compose).
-3. Validate WebSocket + clarification flows end-to-end in production.
-4. Eliminate “stuck executing” UX: backend MCP calls must timeout; UI must surface completion/error (watchdog).
-5. Stabilize key management (STT/OpenAI env vars; no secrets in repo).
+1. Keep end-to-end reliability on NAS (HTTPS + WSS reverse proxy; avoid mixed-content).
+2. Ensure mobile voice capture works broadly (MediaRecorder + WAV fallback).
+3. Keep clarification flows correct (room vs device vs source) and avoid “stuck executing”.
+4. Maintain timeouts on MCP calls to prevent indefinite hangs.
+5. Keep deploys repeatable (compose, health checks, and clear env templates).
 
 **8) Open risks/unknowns (Top 5)**
-1. External API cost/quotas (STT + OpenAI).
-2. Browser audio codec variability (MediaRecorder formats differ).
-3. WebSocket stability (mobile roaming, proxy timeouts, reverse-proxy config).
-4. Ambiguity frequency in real homes (common room/device names).
-5. Safety risk if ports are exposed beyond LAN (prefer firewall/VPN; never public internet by default).
-
-**Key env vars (runtime must-haves)**
-- `PORT` (NAS compose maps host `3002` → container `3000`)
-- `C4_MCP_BASE_URL` (inside compose: `http://c4-mcp:3333`)
-- `C4_MCP_TIMEOUT_MS` (prevents indefinite hangs)
+1. External API cost/quotas and transient failures (STT/LLM).
+2. Browser codec and permission variability (especially iOS/Safari).
+3. WebSocket stability on mobile networks and under reverse proxies.
+4. Ambiguity frequency (common room/device naming) and edge-case retries.
+5. Safety risk if services are exposed beyond LAN (prefer firewall/VPN; never public by default).
 
 **9) Links/paths to full docs**
 - `docs/project_overview.md`
@@ -75,4 +68,4 @@ Provide a lightweight **voice + text UI** for Control4: the backend turns natura
 - `docs/ops/runbook.md`
 - `docs/conventions_guardrails.md`
 - `compose.nas.yaml`
-- `README.md` (repo root)
+- `README.md`

@@ -112,6 +112,45 @@ Notes:
 - If the backend container is built from a Docker image, a simple restart may not pick up code changes. Prefer **rebuild + recreate**.
 - For write tools, ensure the `c4-mcp` container has `C4_WRITES_ENABLED=true` (guardrails can still remain enabled).
 
+#### Option B: MCP STDIO over SSH (VS Code / dev)
+
+Some NAS deployments run the Control4 MCP server as a **STDIO-only** container (no HTTP port). In that case, connect via SSH and pipe STDIO through `docker exec -i`.
+
+Key details:
+
+- Use the **absolute** Docker path on Synology: `/usr/local/bin/docker` (non-interactive `ssh` sessions often have a minimal `PATH`).
+- Container name is typically `c4-voice-c4-mcp-1` (adjust if your project uses a different name).
+
+Example STDIO launch (MCP JSON-RPC over stdout):
+
+```bash
+ssh homeai@<NAS_IP> "/usr/local/bin/docker exec -i c4-voice-c4-mcp-1 python claude_stdio_server.py"
+```
+
+Alternative entrypoint (wrapper that preserves repo import paths):
+
+```bash
+ssh homeai@<NAS_IP> "/usr/local/bin/docker exec -i c4-voice-c4-mcp-1 python -m mcp_cli"
+```
+
+Overrides mechanism (hotfixes without rebuilding image):
+
+- Place overrides at: `/dockerc4-mcp/c4-voice/c4-mcp/overrides/app.py` (on the NAS filesystem).
+- The container is configured with `PYTHONPATH=/app/overrides`, so `import app` resolves to `/app/overrides/app.py`.
+
+Verify overrides are present and imported:
+
+```bash
+ssh homeai@<NAS_IP> "/usr/local/bin/docker exec -i c4-voice-c4-mcp-1 ls -l /app/overrides/app.py"
+ssh homeai@<NAS_IP> "/usr/local/bin/docker exec -i c4-voice-c4-mcp-1 python -c \"import app; print(app.__file__)\""
+```
+
+Restart the MCP container (to pick up override changes):
+
+```bash
+ssh homeai@<NAS_IP> "/usr/local/bin/docker restart c4-voice-c4-mcp-1"
+```
+
 #### Step 1: Backup Current Version
 
 ```bash

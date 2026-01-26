@@ -97,11 +97,14 @@ class MCPClient {
     args.include_candidates = false;
 
     if (tool === 'c4_room_lights_set') {
+      // c4-mcp contract: provide exactly one of room_id OR room_name.
+      // Prefer room_id when present for deterministic resolution.
       if (choice.room_id !== null && choice.room_id !== undefined) {
         args.room_id = this._asIntOrNull(choice.room_id);
-      }
-      if (choice.name) {
+        delete args.room_name;
+      } else if (choice.name) {
         args.room_name = String(choice.name);
+        delete args.room_id;
       }
       return { tool, args };
     }
@@ -204,6 +207,7 @@ class MCPClient {
       'c4_lights_set_last',
       // TV / Media
       'c4_tv_watch_by_name',
+      'c4_tv_watch',
       'c4_tv_off',
       'c4_tv_off_last',
       'c4_tv_remote',

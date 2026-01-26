@@ -59,7 +59,7 @@ Reference deployment uses **Synology Container Manager (Docker Compose)** for re
 
 | Component | Technology | Runs On | Purpose |
 |-----------|-----------|---------|---------|
-| PWA Frontend | HTML5/CSS3/JavaScript | Mobile Browser | User interface, voice input, status display |
+| PWA Frontend | HTML5/CSS3/JavaScript | Mobile Browser | User interface, voice input (MediaRecorder + WAV fallback), status display |
 | Backend Service | Node.js (Express) | Synology DS218+ | Intent parsing, `c4-mcp` coordination, API gateway |
 | Static Hosting (Optional) | Web Station / local server | LAN device | Hosts the frontend files (often run locally for mic permissions) |
 | Reverse Proxy | Synology DSM | DS218+ | HTTPS termination, routing, WebSocket support |
@@ -125,7 +125,7 @@ c4-mcp-app/
 │   │   └── style.css              # Main styles with dark theme
 │   ├── js/                        # JavaScript modules
 │   │   ├── app.js                 # Main application logic
-│   │   ├── voice.js               # MediaRecorder voice input
+│   │   ├── voice.js               # Voice capture (MediaRecorder + WAV fallback)
 │   │   ├── websocket.js           # WebSocket client with reconnection
 │   │   └── config.js              # Configuration and device ID
 │   ├── icons/                     # PWA icons (need to generate)
@@ -189,7 +189,7 @@ c4-mcp-app/
 | **Boundaries** | Runs in mobile browser sandbox; no direct Control4 access |
 | **Upstream** | User interaction |
 | **Downstream** | Backend Service API |
-| **Key Technologies** | Vanilla JS/React/Vue, MediaRecorder API, WebSocket API, Service Workers |
+| **Key Technologies** | Vanilla JS/React/Vue, MediaRecorder API, WebAudio (WAV fallback), WebSocket API, Service Workers |
 
 ### 4.2 Backend Service Module
 
@@ -253,7 +253,8 @@ c4-mcp-app/
 ```json
 {
   "audioData": "base64-encoded-audio-blob",
-  "format": "webm"
+  "format": "webm",
+  "sampleRateHertz": 48000
 }
 ```
 
@@ -287,7 +288,7 @@ c4-mcp-app/
 }
 ```
 
-Session context is provided to `c4-mcp` via the `X-Session-Id` request header (the backend uses the deviceId) so follow-ups can be resolved using `c4_lights_set_last`.
+Session context is provided to `c4-mcp` via the `X-Session-Id` request header (the backend uses the deviceId) so follow-ups can be resolved using tools like `c4_lights_set_last`, `c4_tv_off_last`, and `c4_tv_remote_last`.
 
 **WebSocket Response Stream:**
 ```json
@@ -676,7 +677,7 @@ Response:
 - [ ] Integrate cloud STT API (proof-of-concept)
 - [ ] Integrate cloud LLM API (proof-of-concept)
 - [ ] Create MCP client module (mock MCP server for testing)
-- [ ] Implement voice input in PWA (MediaRecorder API)
+- [ ] Implement voice input in PWA (MediaRecorder + WAV fallback)
 - [ ] Deploy MVP to Synology DS218+ (manual deployment)
 
 ### 13.2 Mid-Term (2–8 Weeks)

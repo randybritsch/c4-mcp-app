@@ -10,6 +10,35 @@ const mcpClient = require('./services/mcp-client');
 let wss = null;
 const activeConnections = new Map();
 
+// Per-client room alias cache:
+// After a user clarifies an ambiguous room query (e.g. "Basement"), remember the chosen room_id
+// so future commands can skip repeated clarification for the same query.
+// Keyed by a best-effort stable client key (deviceId/sub/id/email). In-memory only.
+const roomAliasesByClientKey = new Map();
+
+function normalizeRoomQuery(value) {
+  return (value || '').toString().trim().toLowerCase();
+}
+
+function getClientKey(ws) {
+  if (!ws) return null;
+  const user = ws.user && typeof ws.user === 'object' ? ws.user : null;
+  const rawKey = user?.deviceId || user?.sub || user?.id || user?.email;
+  if (!rawKey) return null;
+  return String(rawKey);
+}
+
+function getClientRoomAliases(clientKey) {
+  if (!clientKey) return null;
+  const key = String(clientKey);
+  let aliases = roomAliasesByClientKey.get(key);
+  if (!aliases) {
+    aliases = new Map();
+    roomAliasesByClientKey.set(key, aliases);
+  }
+  return aliases;
+}
+
 /**
  * Initialize WebSocket server
  */
@@ -126,7 +155,9 @@ async function handleMessage(ws, data) {
       case 'audio-start':
         ws.audioChunks = [];
         ws.audioFormat = message.format ? String(message.format) : 'webm';
-        ws.audioSampleRateHertz = Number.isFinite(Number(message.sampleRateHertz)) ? Number(message.sampleRateHertz) : null;
+        ws.audioSampleRateHertz = Number.isFinite(Number(message.sampleRateHertz))
+          ? Number(message.sampleRateHertz)
+          : null;
         ws.send(JSON.stringify({
           type: 'audio-ready',
           message: 'Ready to receive audio',
@@ -183,7 +214,8 @@ async function handleClarificationChoice(ws, message) {
 
   const { intent, transcript, clarification } = ws.pendingClarification;
   const idx = Number(message.choiceIndex);
-  if (!Number.isInteger(idx) || idx < 0 || idx >= clarification.candidates.length) {
+  const candidates = (clarification && Array.isArray(clarification.candidates)) ? clarification.candidates : [];
+  if (!Number.isInteger(idx) || idx < 0 || idx >= candidates.length) {
     ws.send(
       JSON.stringify({
         type: 'error',
@@ -194,7 +226,56 @@ async function handleClarificationChoice(ws, message) {
     return;
   }
 
-  const choice = clarification.candidates[idx];
+  const choice = candidates[idx];
+
+  // Remember room clarifications per-device so repeated commands like
+  // "Turn on the basement Roku" don't keep asking which "Basement".
+  try {
+    const kind = clarification && clarification.kind ? String(clarification.kind) : '';
+    const query = clarification && clarification.query ? String(clarification.query) : '';
+    const normalizedQuery = normalizeRoomQuery(query);
+    const clientKey = getClientKey(ws);
+
+    const isRoomKind = kind === 'room' || kind.endsWith('_room') || kind.includes('room');
+    const roomId = choice && choice.room_id !== null && choice.room_id !== undefined ? Number(choice.room_id) : null;
+
+    if (isRoomKind && normalizedQuery && clientKey && Number.isFinite(roomId)) {
+      const aliases = getClientRoomAliases(clientKey);
+      if (aliases) {
+        const aliasValue = {
+          room_id: roomId,
+          room_name: choice.name ? String(choice.name) : null,
+        };
+
+        // Store for the clarification query.
+        aliases.set(normalizedQuery, aliasValue);
+
+        // Also store for the intent's room_name if it differs (helps with slight prompt variations).
+        const intentRoomName = intent && intent.args && typeof intent.args === 'object' ? intent.args.room_name : null;
+        const normalizedIntentRoom = normalizeRoomQuery(intentRoomName);
+        if (normalizedIntentRoom && normalizedIntentRoom !== normalizedQuery) {
+          aliases.set(normalizedIntentRoom, aliasValue);
+        }
+
+        logger.info('Stored room alias', {
+          correlationId: ws.correlationId,
+          clientKey,
+          kind,
+          query: normalizedQuery,
+          room_id: roomId,
+          room_name: aliasValue.room_name,
+        });
+      }
+    } else if (isRoomKind && normalizedQuery && !clientKey) {
+      logger.debug('Room alias not stored (no stable client key)', {
+        correlationId: ws.correlationId,
+        kind,
+        query: normalizedQuery,
+      });
+    }
+  } catch (e) {
+    // Best-effort only; do not block the command flow.
+  }
 
   ws.send(
     JSON.stringify({
@@ -288,7 +369,9 @@ async function processAudioStream(ws) {
     }));
 
     const format = ws.audioFormat ? String(ws.audioFormat) : 'webm';
-    const sampleRateHertz = Number.isFinite(Number(ws.audioSampleRateHertz)) ? Number(ws.audioSampleRateHertz) : undefined;
+    const sampleRateHertz = Number.isFinite(Number(ws.audioSampleRateHertz))
+      ? Number(ws.audioSampleRateHertz)
+      : undefined;
     const sttResult = await transcribeAudio(audioData, format, ws.correlationId, sampleRateHertz);
 
     ws.send(JSON.stringify({
@@ -304,6 +387,36 @@ async function processAudioStream(ws) {
     }));
 
     const intent = await parseIntent(sttResult.transcript, ws.correlationId);
+
+    // Best-effort room aliasing: if the user previously clarified an ambiguous room query
+    // (e.g. "Basement" -> room_id 455), reuse that selection for future commands.
+    try {
+      const tool = intent && typeof intent === 'object' ? String(intent.tool || '') : '';
+      const args = intent && typeof intent === 'object' && intent.args && typeof intent.args === 'object'
+        ? intent.args
+        : null;
+      const clientKey = getClientKey(ws);
+
+      if (tool === 'c4_tv_watch_by_name' && args && !('room_id' in args)) {
+        const query = typeof args.room_name === 'string' ? args.room_name : null;
+        const normalizedQuery = normalizeRoomQuery(query);
+        const aliases = getClientRoomAliases(clientKey);
+        const alias = aliases && normalizedQuery ? aliases.get(normalizedQuery) : null;
+        if (alias && Number.isFinite(Number(alias.room_id))) {
+          args.room_id = Number(alias.room_id);
+
+          logger.info('Applied room alias', {
+            correlationId: ws.correlationId,
+            clientKey,
+            tool,
+            query: normalizedQuery,
+            room_id: Number(alias.room_id),
+          });
+        }
+      }
+    } catch (e) {
+      // Best-effort only.
+    }
 
     ws.send(JSON.stringify({
       type: 'intent',

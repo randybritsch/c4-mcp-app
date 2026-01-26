@@ -59,7 +59,13 @@ pids/
 
 # Deployment artifacts (keep scripts, not outputs)
 *.zip
+*.tar
 *.tar.gz
+
+# NAS staging/snapshots (local artifacts; do not commit)
+frontend-nas-staging/
+frontend-nas-update-20260123/
+backend-nas-update-20260123/
 
 # Synology specific
 .synology/

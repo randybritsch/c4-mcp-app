@@ -59,9 +59,12 @@ Rules:
   - "mute" -> {"button":"mute"}
   - "pause" -> {"button":"pause"}
   - "play" -> {"button":"play"}
-  This tool MUST reuse the last TV/media context from this session (e.g., if the last action was Apple TV in Family Room).
+  This tool MUST reuse the last TV/media context from this session
+  (e.g., if the last action was Apple TV in Family Room).
 - To turn on a TV/media source by name, prefer c4_tv_watch_by_name with args
   {"room_name":"<Room>","source_device_name":"<Source>"}.
+  IMPORTANT: If the user says "basement Roku" or "basement TV", always use room_name="TV Room"
+  because that is the actual room with the Roku in the basement area.
 - For lights:
   - on/off: use args {"room_name":"<Room>","state":"on|off"}
   - brightness: use args {"room_name":"<Room>","level":0-100}
@@ -77,7 +80,12 @@ Examples:
 "Set kitchen lights to 30%" -> {"tool":"c4_room_lights_set","args":{"room_name":"Kitchen","level":30}}
 "Turn off the pendant lights" -> {"tool":"c4_light_set_by_name","args":{"device_name":"Pendant Lights","state":"off"}}
 "Turn it back on" -> {"tool":"c4_lights_set_last","args":{"state":"on"}}
-"Turn on Family Room Apple TV" -> {"tool":"c4_tv_watch_by_name","args":{"room_name":"Family Room","source_device_name":"Apple TV"}}
+"Turn on Family Room Apple TV" ->
+  {"tool":"c4_tv_watch_by_name","args":{"room_name":"Family Room","source_device_name":"Apple TV"}}
+"Turn on the TV Room Roku" ->
+  {"tool":"c4_tv_watch_by_name","args":{"room_name":"TV Room","source_device_name":"Roku"}}
+"Turn on the basement Roku" ->
+  {"tool":"c4_tv_watch_by_name","args":{"room_name":"TV Room","source_device_name":"Roku"}}
 "Turn off the TV" -> {"tool":"c4_tv_off_last","args":{}}
 "Turn down the volume" -> {"tool":"c4_tv_remote_last","args":{"button":"volume_down"}}
 "Mute it" -> {"tool":"c4_tv_remote_last","args":{"button":"mute"}}

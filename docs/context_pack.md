@@ -11,11 +11,11 @@
 
 ## Mini executive summary (≤120 words)
 
-c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A PWA frontend streams audio/text to a Node.js backend (Express + WebSocket). The backend uses cloud STT to produce a transcript, then uses an LLM to produce a deterministic tool plan (`{ tool, args }`), and finally executes that plan by calling the separate `c4-mcp` HTTP server (`/mcp/call`). The repos remain fully decoupled: integration happens only over `C4_MCP_BASE_URL`. Conversational memory intentionally lives in `c4-mcp`; this app passes a stable per-device session identifier (deviceId) to `c4-mcp` via `X-Session-Id` so follow-ups like “turn it back on” can use `c4_lights_set_last`. Backend timeouts + a frontend watchdog prevent indefinite “executing…” hangs.
+c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A PWA frontend captures mic audio (MediaRecorder, with a WAV fallback for iOS/Safari) or sends text to a Node.js backend (Express + WebSocket). The backend uses cloud STT to produce a transcript, then uses an LLM to produce a deterministic tool plan (`{ tool, args }`), and finally executes that plan by calling the separate `c4-mcp` HTTP server (`/mcp/call`). The repos remain fully decoupled: integration happens only over `C4_MCP_BASE_URL`. Conversational memory intentionally lives in `c4-mcp`; this app passes a stable per-device session identifier (deviceId) to `c4-mcp` via `X-Session-Id` so follow-ups for lights and TV/media can use `*_last` tools. Backend timeouts + a frontend watchdog prevent indefinite “executing…” hangs.
 
 ## Critical architecture bullets (≤6)
 
-- Voice path: PWA mic → WS audio → backend STT → backend LLM plan → `c4-mcp` tool call → WS progress/results.
+- Voice path: PWA mic (MediaRecorder or WAV fallback) → WS audio → backend STT → backend LLM plan → `c4-mcp` tool call → WS progress/results.
 - Text path: PWA chat → `POST /api/v1/voice/process-text` → LLM plan → `c4-mcp` tool call.
 - Decoupled boundary: only HTTP calls to `c4-mcp` (no shared code; configured via `C4_MCP_BASE_URL`).
 - Session context: backend sends `X-Session-Id: <deviceId>` to `c4-mcp` for follow-ups.
@@ -27,9 +27,9 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 - `backend/src/services/mcp-client.js` — `c4-mcp` HTTP client (payload shape, timeouts, ambiguity handling, `X-Session-Id`).
 - `backend/src/websocket.js` — WS protocol (audio streaming, progress events, clarification loop state).
 - `backend/src/routes/voice.js` — REST voice/text entrypoints; passes deviceId/session id through pipeline.
-- `backend/src/services/llm.js` — LLM prompt + `{ tool, args }` contract; follow-up behavior.
 - `backend/src/services/voice-processor.js` — orchestration of STT → LLM → MCP execution.
 - `frontend/js/app.js` — UI state machine + watchdog + clarification picker.
+- `frontend/js/voice.js` — voice capture (MediaRecorder + WAV fallback).
 - `frontend/js/config.js` — deviceId/session id generation and client config.
 
 ## Interfaces/contracts that must not break
@@ -39,7 +39,7 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 - `GET /api/v1/health`
 - `GET /api/v1/health/mcp`
 - `POST /api/v1/auth/token`
-- `POST /api/v1/voice/process` body `{ audioData: "<base64>", format?: "webm" }`
+- `POST /api/v1/voice/process` body `{ audioData: "<base64>", format?: "webm"|"wav", sampleRateHertz?: number }`
 - `POST /api/v1/voice/process-text` body `{ transcript: "..." }`
 
 **WebSocket protocol (UI ↔ backend)**
@@ -52,7 +52,7 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 
 - List tools: `GET <C4_MCP_BASE_URL>/mcp/list`
 - Call tool: `POST <C4_MCP_BASE_URL>/mcp/call` body `{ "kind": "tool", "name": "<tool>", "args": { ... } }`
-- Session header: `X-Session-Id: <deviceId>` (required for follow-ups to work via `c4_lights_set_last`)
+- Session header: `X-Session-Id: <deviceId>` (required for follow-ups via `c4_lights_set_last`, `c4_tv_off_last`, `c4_tv_remote_last`)
 
 ## Today’s objectives and acceptance criteria
 
@@ -69,10 +69,12 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 **Objective C — Make follow-ups work without duplicating memory**
 
 - “Turn off <room> lights” then “turn it back on” succeeds in the same browser session.
-- Follow-up resolution uses `X-Session-Id` + `c4_lights_set_last` (no state duplication in this repo).
+- “Turn off the TV” then “mute it” succeeds in the same browser session.
+- Follow-up resolution uses `X-Session-Id` + `*_last` tools (no state duplication in this repo).
 
 ## Guardrails block (from conventions)
 
+- Node.js: compatible with Node 18+; avoid native addons.
 - Keep repos decoupled: never add shared code that couples `c4-mcp-app` to `c4-mcp` internals.
 - Do not re-implement memory here; always rely on `c4-mcp` session memory via `X-Session-Id`.
 - Do not break REST/WS/MCP payload shapes; changes must be additive and backwards-compatible.

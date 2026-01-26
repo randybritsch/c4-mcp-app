@@ -167,7 +167,6 @@ Update the 'docs/context_pack.md' with the new Context Pack
 
 > **Goal:** Instantly load context from your external files.
 
-```text
 You are joining an ongoing software project. Load context strictly from the following pasted summaries and references.
 
 [Paste the latest BOOTSTRAP SUMMARY]
