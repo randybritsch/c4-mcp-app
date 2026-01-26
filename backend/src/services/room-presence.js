@@ -76,54 +76,55 @@ async function buildRoomPresenceReport(mcpClient, roomChoice, correlationId, ses
     : null;
   const roomName = roomChoice && roomChoice.name ? String(roomChoice.name) : null;
 
-  // Media (read-only): best-effort.
-  const watchStatus = await mcpClient.sendCommand(
-    { tool: 'c4_room_watch_status', args: { room_id: String(roomId) } },
-    correlationId,
-    sessionId,
-  );
-  const listenStatus = await mcpClient.sendCommand(
-    { tool: 'c4_room_listen_status', args: { room_id: String(roomId) } },
-    correlationId,
-    sessionId,
-  );
-  const nowPlaying = await mcpClient.sendCommand(
-    { tool: 'c4_room_now_playing', args: { room_id: String(roomId), max_sources: 30 } },
-    correlationId,
-    sessionId,
-  );
-
-  // Lights: discover lights in the room, then sample levels.
-  const lightsFound = await mcpClient.sendCommand(
-    { tool: 'c4_find_devices', args: { category: 'lights', room_id: String(roomId), limit: 25, include_raw: false } },
-    correlationId,
-    sessionId,
-  );
+  // Do the read-only status calls in parallel to keep this snappy over slow gateways.
+  const [watchStatus, listenStatus, nowPlaying, lightsFound] = await Promise.all([
+    mcpClient.sendCommand(
+      { tool: 'c4_room_watch_status', args: { room_id: String(roomId) } },
+      correlationId,
+      sessionId,
+    ),
+    mcpClient.sendCommand(
+      { tool: 'c4_room_listen_status', args: { room_id: String(roomId) } },
+      correlationId,
+      sessionId,
+    ),
+    mcpClient.sendCommand(
+      { tool: 'c4_room_now_playing', args: { room_id: String(roomId), max_sources: 30 } },
+      correlationId,
+      sessionId,
+    ),
+    mcpClient.sendCommand(
+      { tool: 'c4_find_devices', args: { category: 'lights', room_id: String(roomId), limit: 25, include_raw: false } },
+      correlationId,
+      sessionId,
+    ),
+  ]);
 
   const lightDevices = _normalizeDeviceCandidates(_extractDevicesFromFindDevicesResult(lightsFound), 25);
 
-  const lightSamples = [];
-  const sampleLimit = Math.min(lightDevices.length, 12);
-  for (let i = 0; i < sampleLimit; i += 1) {
-    const d = lightDevices[i];
-    // eslint-disable-next-line no-await-in-loop
-    const levelResp = await mcpClient.sendCommand(
-      { tool: 'c4_light_get_level', args: { device_id: String(d.device_id) } },
-      correlationId,
-      sessionId,
-    );
+  const sampleLimit = Math.min(lightDevices.length, 6);
+  const lightSamples = await Promise.all(
+    lightDevices
+      .slice(0, sampleLimit)
+      .map(async (d) => {
+        const levelResp = await mcpClient.sendCommand(
+          { tool: 'c4_light_get_level', args: { device_id: String(d.device_id) } },
+          correlationId,
+          sessionId,
+        );
 
-    const level = levelResp?.result?.level !== undefined
-      ? Number(levelResp.result.level)
-      : (levelResp?.result?.result?.level !== undefined ? Number(levelResp.result.result.level) : null);
+        const level = levelResp?.result?.level !== undefined
+          ? Number(levelResp.result.level)
+          : (levelResp?.result?.result?.level !== undefined ? Number(levelResp.result.result.level) : null);
 
-    lightSamples.push({
-      name: d.name,
-      device_id: d.device_id,
-      level: Number.isFinite(level) ? level : null,
-      raw: levelResp,
-    });
-  }
+        return {
+          name: d.name,
+          device_id: d.device_id,
+          level: Number.isFinite(level) ? level : null,
+          raw: levelResp,
+        };
+      }),
+  );
 
   const lightsOn = lightSamples.filter((l) => Number.isFinite(Number(l.level)) && Number(l.level) > 0);
 

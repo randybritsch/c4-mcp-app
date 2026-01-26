@@ -103,7 +103,15 @@ async function main() {
 
   ws.send(JSON.stringify({ type: 'text-command', transcript }));
 
-  const first = await waitForOneOf(ws, ['command-complete', 'clarification-required'], 20000);
+  const first = await waitForOneOf(ws, ['command-complete', 'clarification-required', 'error'], 45000);
+
+  if (first.type === 'error') {
+    console.log('Got error');
+    console.log(JSON.stringify(first, null, 2));
+    ws.close();
+    process.exitCode = 1;
+    return;
+  }
 
   if (first.type === 'command-complete') {
     console.log('Got command-complete (no clarification)');
@@ -139,7 +147,14 @@ async function main() {
 
   ws.send(JSON.stringify({ type: 'clarification-choice', choiceIndex }));
 
-  const complete = await waitForOneOf(ws, ['command-complete'], 30000);
+  const complete = await waitForOneOf(ws, ['command-complete', 'error'], 60000);
+  if (complete.type === 'error') {
+    console.log('Got error');
+    console.log(JSON.stringify(complete, null, 2));
+    ws.close();
+    process.exitCode = 1;
+    return;
+  }
   console.log('Got command-complete');
   console.log(JSON.stringify({
     ok: complete?.result?.success === true,
