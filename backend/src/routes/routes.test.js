@@ -35,6 +35,22 @@ describe('Auth Endpoint', () => {
     expect(response.body.error).toHaveProperty('code', 'MISSING_PARAMETER');
   });
 
+  test('POST /api/v1/auth/token should return 400 for invalid JSON', async () => {
+    const response = await request(app)
+      .post('/api/v1/auth/token')
+      .set('Content-Type', 'application/json')
+      .send('{"deviceId": "test"')
+
+    expect(response.status).toBe(400);
+    expect(response.body).toEqual({
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Request body must be valid JSON',
+        correlationId: expect.any(String),
+      },
+    });
+  });
+
   test('POST /api/v1/auth/token can return non-expiring token when JWT_EXPIRY=never', async () => {
     const prev = process.env.JWT_EXPIRY;
     process.env.JWT_EXPIRY = 'never';

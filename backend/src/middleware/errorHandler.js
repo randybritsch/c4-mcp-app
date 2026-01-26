@@ -7,6 +7,13 @@ const logger = require('../utils/logger');
 function errorHandler(err, req, res, _next) {
   const correlationId = req.correlationId || 'unknown';
 
+  // body-parser JSON parse errors (e.g. malformed JSON) should be 400s.
+  // PowerShell users often accidentally send backslashes (\") which makes JSON invalid.
+  const isJsonParseError =
+    err
+    && (err.type === 'entity.parse.failed'
+      || (err instanceof SyntaxError && err.status === 400));
+
   // Log error
   logger.error('Request error', {
     correlationId,
@@ -15,6 +22,16 @@ function errorHandler(err, req, res, _next) {
     code: err.code || 'UNHANDLED_ERROR',
     statusCode: err.statusCode || 500,
   });
+
+  if (isJsonParseError) {
+    return res.status(400).json({
+      error: {
+        code: 'INVALID_JSON',
+        message: 'Request body must be valid JSON',
+        correlationId,
+      },
+    });
+  }
 
   // Handle AppError instances
   if (err instanceof AppError) {
