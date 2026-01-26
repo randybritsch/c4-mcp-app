@@ -305,13 +305,19 @@ class App {
     this.showTranscript(message.transcript || this.elements.transcript.textContent || '');
 
     const kind = clarification.kind || 'choice';
+    const prompt = (clarification.prompt && typeof clarification.prompt === 'string')
+      ? clarification.prompt
+      : '';
+
     const query = clarification.query ? ` "${clarification.query}"` : '';
-    const label =
-      kind === 'room'
-        ? `Which room did you mean${query}?`
-        : kind === 'light'
-          ? `Which light did you mean${query}?`
-          : `Which one did you mean${query}?`;
+    const label = prompt
+      || (
+        kind === 'room'
+          ? `Which room did you mean${query}?`
+          : kind === 'light'
+            ? `Which light did you mean${query}?`
+            : `Which one did you mean${query}?`
+      );
 
     if (this.elements.clarificationLabel) {
       this.elements.clarificationLabel.textContent = label;

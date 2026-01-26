@@ -104,4 +104,59 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
       },
     });
   });
+
+  test('c4_room_listen_by_name keeps source_device_name when clarifying room', () => {
+    const originalIntent = {
+      tool: 'c4_room_listen_by_name',
+      args: {
+        source_device_name: 'Spotify',
+      },
+    };
+
+    const choice = {
+      name: 'Family Room',
+      room_id: 101,
+      device_id: null,
+    };
+
+    const refined = mcpClient.buildRefinedIntentFromChoice(originalIntent, choice);
+
+    expect(refined).toEqual({
+      tool: 'c4_room_listen_by_name',
+      args: {
+        source_device_name: 'Spotify',
+        require_unique: true,
+        include_candidates: false,
+        room_id: 101,
+        room_name: 'Family Room',
+      },
+    });
+  });
+
+  test('c4_room_listen_by_name uses choice.name as source_device_name for device candidate', () => {
+    const originalIntent = {
+      tool: 'c4_room_listen_by_name',
+      args: {
+        room_name: 'Family Room',
+        source_device_name: 'Spotify',
+      },
+    };
+
+    const choice = {
+      name: 'Pandora',
+      device_id: 'dev-123',
+    };
+
+    const refined = mcpClient.buildRefinedIntentFromChoice(originalIntent, choice);
+
+    expect(refined).toEqual({
+      tool: 'c4_room_listen_by_name',
+      args: {
+        room_name: 'Family Room',
+        source_device_name: 'Pandora',
+        require_unique: true,
+        include_candidates: false,
+      },
+    });
+  });
 });

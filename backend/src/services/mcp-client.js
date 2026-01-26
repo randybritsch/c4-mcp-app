@@ -170,7 +170,8 @@ class MCPClient {
       }
 
       // Listen source disambiguation: update the source name.
-      if (choice.name) {
+      // Only apply when the choice represents a device/source candidate (not a room).
+      if (choice.device_id && choice.name) {
         args.source_device_name = String(choice.name);
       }
 

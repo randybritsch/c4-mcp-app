@@ -6,6 +6,8 @@ async function processAudioStream(ws, {
   mcpClient,
   roomAliases,
 } = {}) {
+  const config = require('../config');
+
   const shouldAutoResolveRoomGroup = (transcript, originalIntent, clarification) => {
     if (!transcript || typeof transcript !== 'string') return false;
     if (!clarification || typeof clarification !== 'object') return false;
@@ -27,6 +29,56 @@ async function processAudioStream(ws, {
     if (clarification.candidates.length > 12) return false;
 
     return true;
+  };
+
+  const _detectMoodRequest = (transcript) => {
+    if (!transcript || typeof transcript !== 'string') return null;
+    const t = transcript.toLowerCase();
+
+    // Keep this conservative; only trigger on explicit mood/vibe phrasing.
+    const moodHit = /(\bromantic\b|\bcozy\b|\bcosy\b|\brelax\b|\brelaxed\b|\bchill\b|\bparty\b|\bmood\b|\bvibe\b|\bdate\s*night\b|\bmovie\s*night\b|\bset\s+the\s+mood\b)/i.test(t);
+    if (!moodHit) return null;
+
+    // Rough presets.
+    const presets = [
+      { re: /romantic|date\s*night|set\s+the\s+mood/i, level: 20, label: 'romantic' },
+      { re: /movie\s*night/i, level: 15, label: 'movie' },
+      { re: /party/i, level: 70, label: 'party' },
+      { re: /cozy|cosy/i, level: 35, label: 'cozy' },
+      { re: /relax|relaxed|chill/i, level: 25, label: 'relax' },
+    ];
+
+    const matched = presets.find((p) => p.re.test(transcript));
+    const defaultLevel = Number.isFinite(Number(config?.mood?.defaultLightLevel))
+      ? Number(config.mood.defaultLightLevel)
+      : 25;
+
+    return {
+      kind: matched ? matched.label : 'mood',
+      lightLevel: matched ? matched.level : defaultLevel,
+    };
+  };
+
+  const _buildRoomCandidatesFromListRooms = async (correlationId, sessionId) => {
+    const resp = await mcpClient.sendCommand({ tool: 'c4_list_rooms', args: {} }, correlationId, sessionId);
+    const rooms = resp?.result?.result?.rooms || resp?.result?.rooms;
+    if (!Array.isArray(rooms) || rooms.length === 0) return [];
+
+    return rooms
+      .map((r) => {
+        if (!r || typeof r !== 'object') return null;
+        const name = r.name || r.room_name || r.roomName || r.title;
+        const roomId = r.room_id !== undefined ? r.room_id
+          : r.id !== undefined ? r.id
+            : r.roomId !== undefined ? r.roomId
+              : null;
+        return {
+          name: name ? String(name) : null,
+          room_id: roomId !== null && roomId !== undefined ? Number(roomId) : null,
+        };
+      })
+      .filter((c) => c && c.name)
+      .slice(0, 12);
   };
 
   const executeRoomGroup = async (intent, clarification, correlationId, sessionId) => {
@@ -89,6 +141,60 @@ async function processAudioStream(ws, {
     const sttResult = await transcribeAudio(audioData, format, ws.correlationId, sampleRateHertz);
 
     wsMessages.sendTranscript(ws, sttResult.transcript, sttResult.confidence);
+
+    // Mood / vibe requests: ask a follow-up question rather than forcing a scene.
+    // This is opt-in via config to preserve existing behavior unless explicitly enabled.
+    if (config?.mood?.enabled) {
+      const mood = _detectMoodRequest(sttResult.transcript);
+      if (mood) {
+        wsMessages.sendProcessing(ws, 'intent-parsing');
+
+        const candidates = await _buildRoomCandidatesFromListRooms(ws.correlationId, ws.user?.deviceId);
+        if (!candidates.length) {
+          wsMessages.sendError(ws, {
+            code: 'MOOD_NO_ROOMS',
+            message: 'I can help set the mood, but I could not list rooms right now.',
+          });
+          ws.audioChunks = [];
+          return;
+        }
+
+        const wantsMusic = Boolean(config?.mood?.music?.enabled)
+          && Boolean(String(config?.mood?.music?.defaultSourceName || '').trim());
+
+        const prompt = wantsMusic
+          ? 'Would you like me to dim the lights and put on some music? Which room?'
+          : 'Would you like me to dim the lights? Which room?';
+
+        const intentForChoice = {
+          tool: 'c4_room_lights_set',
+          args: { level: Math.max(0, Math.min(100, Math.round(Number(mood.lightLevel) || 25))) },
+        };
+
+        const clarification = {
+          kind: 'room',
+          query: null,
+          prompt,
+          candidates,
+        };
+
+        ws.pendingClarification = {
+          transcript: sttResult.transcript,
+          intent: intentForChoice,
+          clarification,
+          plan: {
+            kind: 'mood',
+            mood: mood.kind,
+            lights: { level: intentForChoice.args.level },
+            music: wantsMusic ? { source_device_name: String(config.mood.music.defaultSourceName).trim() } : null,
+          },
+        };
+
+        wsMessages.sendClarificationRequired(ws, sttResult.transcript, intentForChoice, clarification);
+        ws.audioChunks = [];
+        return;
+      }
+    }
 
     // Step 2: Intent parsing
     wsMessages.sendProcessing(ws, 'intent-parsing');

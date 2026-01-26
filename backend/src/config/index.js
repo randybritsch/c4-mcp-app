@@ -65,6 +65,26 @@ const config = {
     })(),
   },
 
+  // Multi-step “mood” recommendations (non-scene fallback).
+  // If enabled, the backend can ask a follow-up (room selection) and then execute a small plan
+  // like dimming lights and optionally starting music.
+  mood: {
+    enabled: /^(1|true|yes)$/i.test(String(process.env.MOOD_PLANS_ENABLED || '').trim()),
+    defaultLightLevel: (() => {
+      const n = Number(process.env.MOOD_DEFAULT_LIGHT_LEVEL);
+      if (!Number.isFinite(n)) return 25;
+      return Math.max(0, Math.min(100, Math.round(n)));
+    })(),
+    music: {
+      defaultSourceName: String(
+        process.env.MOOD_MUSIC_SOURCE_NAME
+          || process.env.DEFAULT_MUSIC_SOURCE_NAME
+          || '',
+      ).trim(),
+      enabled: /^(1|true|yes)$/i.test(String(process.env.MOOD_MUSIC_ENABLED || '').trim()),
+    },
+  },
+
   // Control4 MCP
   control4: {
     // This backend talks to the c4-mcp HTTP server (not directly to Director).

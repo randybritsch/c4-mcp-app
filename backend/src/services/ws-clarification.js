@@ -25,6 +25,9 @@ async function handleClarificationChoice(ws, message, {
   }
 
   const choice = candidates[idx];
+  const pendingPlan = ws.pendingClarification && ws.pendingClarification.plan
+    ? ws.pendingClarification.plan
+    : null;
 
   // Remember room clarifications per-device so repeated commands like
   // "Turn on the basement Roku" don't keep asking which "Basement".
@@ -69,6 +72,64 @@ async function handleClarificationChoice(ws, message, {
       message: 'Command failed',
       details: mcpResult,
     });
+    ws.pendingClarification = null;
+    return;
+  }
+
+  // Optional multi-step plan after clarification.
+  if (pendingPlan && pendingPlan.kind === 'mood') {
+    let musicResult = null;
+    const musicSource = pendingPlan.music && pendingPlan.music.source_device_name
+      ? String(pendingPlan.music.source_device_name).trim()
+      : '';
+
+    if (musicSource) {
+      const listenIntentTemplate = {
+        tool: 'c4_room_listen_by_name',
+        args: {
+          source_device_name: musicSource,
+        },
+      };
+
+      const listenIntent = mcpClient.buildRefinedIntentFromChoice(listenIntentTemplate, choice);
+      if (listenIntent) {
+        try {
+          musicResult = await mcpClient.sendCommand(listenIntent, ws.correlationId, ws.user?.deviceId);
+        } catch (e) {
+          musicResult = {
+            success: false,
+            tool: 'c4_room_listen_by_name',
+            args: listenIntent.args,
+            result: { ok: false, error: e && e.message ? e.message : String(e) },
+            timestamp: new Date().toISOString(),
+          };
+        }
+      }
+    }
+
+    const aggregate = {
+      success: true,
+      aggregate: {
+        kind: 'mood-plan',
+        mood: pendingPlan.mood || 'mood',
+        room_name: choice && choice.name ? String(choice.name) : null,
+        room_id: choice && choice.room_id !== undefined && choice.room_id !== null ? Number(choice.room_id) : null,
+        lights_level: pendingPlan.lights && pendingPlan.lights.level !== undefined ? pendingPlan.lights.level : null,
+        music_source: musicSource || null,
+      },
+      results: {
+        lights: mcpResult,
+        music: musicResult,
+      },
+      warnings: (
+        musicSource
+        && musicResult
+        && musicResult.success !== true
+      ) ? ['Music did not start (see results.music).'] : [],
+      timestamp: new Date().toISOString(),
+    };
+
+    wsMessages.sendCommandComplete(ws, aggregate, transcript, refinedIntent);
     ws.pendingClarification = null;
     return;
   }
