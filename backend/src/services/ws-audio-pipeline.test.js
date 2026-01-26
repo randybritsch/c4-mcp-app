@@ -212,3 +212,169 @@ describe('ws-audio-pipeline mood recommendation', () => {
     restore();
   });
 });
+
+describe('ws-audio-pipeline room presence ("I\'m in <room>")', () => {
+  test('unique match returns command-complete with room-presence aggregate (no LLM parse)', async () => {
+    const { processAudioStream, restore } = loadProcessAudioStreamWithEnv({
+      MOOD_PLANS_ENABLED: '',
+      MOOD_MUSIC_ENABLED: '',
+      MOOD_MUSIC_SOURCE_NAME: '',
+    });
+
+    const ws = makeWs();
+
+    const wsMessages = {
+      sendError: jest.fn(),
+      sendProcessing: jest.fn(),
+      sendTranscript: jest.fn(),
+      sendIntent: jest.fn(),
+      sendClarificationRequired: jest.fn(),
+      sendCommandComplete: jest.fn(),
+    };
+
+    const logger = {
+      info: jest.fn(),
+      error: jest.fn(),
+    };
+
+    const transcribeAudio = jest.fn().mockResolvedValue({
+      transcript: "I'm in the Master Bedroom",
+      confidence: 0.9,
+    });
+
+    const parseIntent = jest.fn();
+
+    const mcpClient = {
+      sendCommand: jest.fn().mockImplementation((intent) => {
+        if (!intent || typeof intent !== 'object') throw new Error('missing intent');
+        switch (intent.tool) {
+          case 'c4_find_rooms':
+            return Promise.resolve({
+              success: true,
+              result: { result: { rooms: [{ name: 'Master Bedroom', id: 123 }] } },
+            });
+          case 'c4_room_watch_status':
+          case 'c4_room_listen_status':
+          case 'c4_room_now_playing':
+            return Promise.resolve({ success: true, result: {} });
+          case 'c4_find_devices':
+            return Promise.resolve({ success: true, result: { devices: [] } });
+          default:
+            throw new Error(`Unexpected tool call: ${intent.tool}`);
+        }
+      }),
+      buildRefinedIntentFromChoice: jest.fn(),
+    };
+
+    const roomAliases = {
+      applyRoomAliasToIntent: jest.fn(),
+    };
+
+    await processAudioStream(ws, {
+      logger,
+      wsMessages,
+      transcribeAudio,
+      parseIntent,
+      mcpClient,
+      roomAliases,
+    });
+
+    restore();
+
+    expect(parseIntent).not.toHaveBeenCalled();
+    expect(wsMessages.sendClarificationRequired).not.toHaveBeenCalled();
+    expect(wsMessages.sendCommandComplete).toHaveBeenCalledTimes(1);
+
+    const [_wsArg, result, transcript, intent] = wsMessages.sendCommandComplete.mock.calls[0];
+    expect(transcript).toBe("I'm in the Master Bedroom");
+    expect(intent).toEqual({ tool: 'c4_room_presence', args: { room_id: 123 } });
+    expect(result).toEqual(
+      expect.objectContaining({
+        success: true,
+        aggregate: expect.objectContaining({ kind: 'room-presence', room_id: 123, room_name: 'Master Bedroom' }),
+        message: expect.stringContaining('Master Bedroom'),
+      }),
+    );
+  });
+
+  test('ambiguous match triggers clarification-required and stores a presence plan', async () => {
+    const { processAudioStream, restore } = loadProcessAudioStreamWithEnv({
+      MOOD_PLANS_ENABLED: '',
+      MOOD_MUSIC_ENABLED: '',
+      MOOD_MUSIC_SOURCE_NAME: '',
+    });
+
+    const ws = makeWs();
+
+    const wsMessages = {
+      sendError: jest.fn(),
+      sendProcessing: jest.fn(),
+      sendTranscript: jest.fn(),
+      sendIntent: jest.fn(),
+      sendClarificationRequired: jest.fn(),
+      sendCommandComplete: jest.fn(),
+    };
+
+    const logger = {
+      info: jest.fn(),
+      error: jest.fn(),
+    };
+
+    const transcribeAudio = jest.fn().mockResolvedValue({
+      transcript: "I'm in the Basement",
+      confidence: 0.9,
+    });
+
+    const parseIntent = jest.fn();
+
+    const mcpClient = {
+      sendCommand: jest.fn().mockResolvedValue({
+        success: true,
+        result: {
+          result: {
+            rooms: [
+              { name: 'Basement Bathroom', id: 456 },
+              { name: 'Basement Stairs', id: 455 },
+            ],
+          },
+        },
+      }),
+      buildRefinedIntentFromChoice: jest.fn(),
+    };
+
+    const roomAliases = {
+      applyRoomAliasToIntent: jest.fn(),
+    };
+
+    await processAudioStream(ws, {
+      logger,
+      wsMessages,
+      transcribeAudio,
+      parseIntent,
+      mcpClient,
+      roomAliases,
+    });
+
+    restore();
+
+    expect(parseIntent).not.toHaveBeenCalled();
+    expect(wsMessages.sendCommandComplete).not.toHaveBeenCalled();
+    expect(wsMessages.sendClarificationRequired).toHaveBeenCalledTimes(1);
+
+    const [_wsArg, transcript, intent, clarification] = wsMessages.sendClarificationRequired.mock.calls[0];
+    expect(transcript).toBe("I'm in the Basement");
+    expect(intent).toEqual({ tool: 'c4_room_presence', args: { room_name: 'Basement' } });
+    expect(clarification).toEqual(
+      expect.objectContaining({
+        kind: 'room',
+        query: 'Basement',
+        prompt: expect.stringContaining('Which room'),
+        candidates: expect.any(Array),
+      }),
+    );
+
+    expect(ws.pendingClarification && ws.pendingClarification.plan).toEqual(
+      expect.objectContaining({ kind: 'presence', query: 'Basement' }),
+    );
+  });
+});

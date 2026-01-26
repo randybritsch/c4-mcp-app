@@ -4,7 +4,8 @@ async function handleClarificationChoice(ws, message, {
   mcpClient,
   roomAliases,
 } = {}) {
-  const { isMoodPlan } = require('./pending-plans');
+  const { isMoodPlan, isPresencePlan } = require('./pending-plans');
+  const { buildRoomPresenceReport } = require('./room-presence');
   if (!ws || !wsMessages || !mcpClient || !roomAliases) {
     throw new Error('ws-clarification: missing dependencies');
   }
@@ -29,6 +30,23 @@ async function handleClarificationChoice(ws, message, {
   const pendingPlan = ws.pendingClarification && ws.pendingClarification.plan
     ? ws.pendingClarification.plan
     : null;
+
+  // Presence/report plans are room-selection only (no "refined intent" execution).
+  if (isPresencePlan(pendingPlan)) {
+    wsMessages.sendProcessing(ws, 'executing');
+
+    // Store best-effort current room on the ws connection for future features.
+    ws.currentRoom = {
+      room_id: choice && choice.room_id !== undefined && choice.room_id !== null ? Number(choice.room_id) : null,
+      room_name: choice && choice.name ? String(choice.name) : null,
+      updatedAt: new Date().toISOString(),
+    };
+
+    const report = await buildRoomPresenceReport(mcpClient, choice, ws.correlationId, ws.user?.deviceId);
+    wsMessages.sendCommandComplete(ws, report, transcript, { tool: 'c4_room_presence', args: { room_id: ws.currentRoom.room_id } });
+    ws.pendingClarification = null;
+    return;
+  }
 
   // Remember room clarifications per-device so repeated commands like
   // "Turn on the basement Roku" don't keep asking which "Basement".

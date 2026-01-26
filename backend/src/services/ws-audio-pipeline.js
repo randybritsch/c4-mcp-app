@@ -111,7 +111,8 @@ async function processTranscript(ws, transcript, {
   roomAliases,
 } = {}) {
   const config = require('../config');
-  const { buildMoodPlan } = require('./pending-plans');
+  const { buildMoodPlan, buildPresencePlan } = require('./pending-plans');
+  const { findRoomCandidatesByName, buildRoomPresenceReport } = require('./room-presence');
 
   if (!ws || !wsMessages || !logger || !parseIntent || !mcpClient || !roomAliases) {
     throw new Error('ws-audio-pipeline: missing dependencies');
@@ -119,6 +120,78 @@ async function processTranscript(ws, transcript, {
 
   try {
     const safeTranscript = (typeof transcript === 'string') ? transcript : '';
+
+    const detectPresenceRoomStatement = (t) => {
+      if (!t || typeof t !== 'string') return null;
+      const raw = t.trim();
+      // Examples:
+      // - "I'm in the Master Bedroom"
+      // - "I am in Master Bedroom"
+      // - "We're in the basement"
+      const m = raw.match(/^\s*(i\s*'?m|i\s+am|we\s*'?re|we\s+are)\s+in\s+(?:the\s+)?(.+?)\s*$/i);
+      if (!m) return null;
+      const room = m[2] ? String(m[2]).trim() : '';
+      if (!room) return null;
+      // Keep conservative: avoid triggering on "I'm in a mood".
+      if (/\bmood\b/i.test(room)) return null;
+      return { roomQuery: room };
+    };
+
+    // Presence update: "I'm in <room>" -> query what's on (read-only) and store on connection.
+    // This bypasses LLM parsing to stay fast and deterministic.
+    const presence = detectPresenceRoomStatement(safeTranscript);
+    if (presence) {
+      wsMessages.sendProcessing(ws, 'intent-parsing');
+
+      const candidates = await findRoomCandidatesByName(
+        mcpClient,
+        presence.roomQuery,
+        ws.correlationId,
+        ws.user?.deviceId,
+      );
+
+      if (!candidates.length) {
+        wsMessages.sendError(ws, {
+          code: 'ROOM_NOT_FOUND',
+          message: `I heard that you're in "${presence.roomQuery}", but I couldn't find that room.`,
+        });
+        ws.audioChunks = [];
+        return;
+      }
+
+      if (candidates.length === 1) {
+        wsMessages.sendProcessing(ws, 'executing');
+        const choice = candidates[0];
+        ws.currentRoom = {
+          room_id: choice && choice.room_id !== undefined && choice.room_id !== null ? Number(choice.room_id) : null,
+          room_name: choice && choice.name ? String(choice.name) : null,
+          updatedAt: new Date().toISOString(),
+        };
+
+        const report = await buildRoomPresenceReport(mcpClient, choice, ws.correlationId, ws.user?.deviceId);
+        wsMessages.sendCommandComplete(ws, report, safeTranscript, { tool: 'c4_room_presence', args: { room_id: ws.currentRoom.room_id } });
+        ws.audioChunks = [];
+        return;
+      }
+
+      const clarification = {
+        kind: 'room',
+        query: presence.roomQuery,
+        prompt: `Got it. Which room are you in?`,
+        candidates,
+      };
+
+      ws.pendingClarification = {
+        transcript: safeTranscript,
+        intent: null,
+        clarification,
+        plan: buildPresencePlan({ query: presence.roomQuery }),
+      };
+
+      wsMessages.sendClarificationRequired(ws, safeTranscript, { tool: 'c4_room_presence', args: { room_name: presence.roomQuery } }, clarification);
+      ws.audioChunks = [];
+      return;
+    }
 
     // Mood / vibe requests: ask a follow-up question rather than forcing a scene.
     // This is opt-in via config to preserve existing behavior unless explicitly enabled.

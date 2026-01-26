@@ -382,6 +382,17 @@ class App {
     const intentStr = JSON.stringify(command.intent);
     const statusClass = command.success ? 'success' : 'error';
 
+    const resultMessage = command && command.result && typeof command.result === 'object'
+      ? (
+        (typeof command.result.message === 'string' ? command.result.message : '')
+        || (command.result.aggregate && typeof command.result.aggregate.summary === 'string' ? command.result.aggregate.summary : '')
+      )
+      : '';
+
+    const resultHtml = resultMessage
+      ? `<div class="log-item-result">${resultMessage}</div>`
+      : '';
+
     return `
       <div class="log-item ${statusClass}">
         <div class="log-item-header">
@@ -390,6 +401,7 @@ class App {
         </div>
         <div class="log-item-transcript">"${command.transcript}"</div>
         <div class="log-item-intent">${intentStr}</div>
+        ${resultHtml}
       </div>
     `;
   }

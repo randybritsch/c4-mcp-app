@@ -272,6 +272,15 @@ header h1 {
   font-family: 'Courier New', monospace;
 }
 
+.log-item-result {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 0.95rem;
+  color: var(--text-color);
+  white-space: pre-wrap;
+}
+
 /* Footer */
 footer {
   text-align: center;
