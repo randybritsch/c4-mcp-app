@@ -3,13 +3,93 @@ function _safeString(x) {
   return String(x);
 }
 
+function _findFirstArrayByKey(value, key, maxDepth = 6) {
+  const needle = String(key);
+  const visited = new Set();
+
+  function walk(node, depth) {
+    if (!node || depth < 0) return null;
+    if (typeof node !== 'object') return null;
+    if (visited.has(node)) return null;
+    visited.add(node);
+
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        const found = walk(item, depth - 1);
+        if (found) return found;
+      }
+      return null;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(node, needle) && Array.isArray(node[needle])) {
+      return node[needle];
+    }
+
+    for (const v of Object.values(node)) {
+      const found = walk(v, depth - 1);
+      if (found) return found;
+    }
+
+    return null;
+  }
+
+  return walk(value, maxDepth);
+}
+
 function _extractRoomsFromFindRoomsResult(resp) {
   const rooms = resp?.result?.result?.rooms
     || resp?.result?.rooms
     || resp?.result?.result?.result?.rooms
     || resp?.result?.result?.result?.result?.rooms;
 
-  return Array.isArray(rooms) ? rooms : [];
+  if (Array.isArray(rooms)) return rooms;
+  const deepRooms = _findFirstArrayByKey(resp, 'rooms', 7);
+  return Array.isArray(deepRooms) ? deepRooms : [];
+}
+
+function _extractRoomsFromListRoomsResult(resp) {
+  const rooms = resp?.result?.rooms
+    || resp?.result?.result?.rooms
+    || resp?.result?.result
+    || resp?.result?.result?.result;
+
+  if (Array.isArray(rooms)) return rooms;
+  const deepRooms = _findFirstArrayByKey(resp, 'rooms', 7);
+  return Array.isArray(deepRooms) ? deepRooms : [];
+}
+
+function _normalizeNameForMatch(name) {
+  return _safeString(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function _filterRoomCandidatesByQuery(candidates, query, limit = 12) {
+  const q = _normalizeNameForMatch(query);
+  if (!q) return (candidates || []).slice(0, limit);
+
+  const scored = (candidates || [])
+    .map((c) => {
+      const name = c && c.name ? String(c.name) : '';
+      const n = _normalizeNameForMatch(name);
+      if (!n) return null;
+
+      // Score: exact (3), startsWith (2), includes (1)
+      const score = (n === q) ? 3 : (n.startsWith(q) ? 2 : (n.includes(q) ? 1 : 0));
+      if (score <= 0) return null;
+      return { ...c, _score: score, _norm: n };
+    })
+    .filter(Boolean)
+    .sort((a, b) => {
+      if (b._score !== a._score) return b._score - a._score;
+      // Prefer shorter names when equally good (usually more specific match)
+      return a._norm.length - b._norm.length;
+    })
+    .slice(0, limit)
+    .map(({ _score, _norm, ...rest }) => rest);
+
+  return scored;
 }
 
 function _normalizeRoomCandidates(rooms, limit = 12) {
@@ -67,7 +147,19 @@ async function findRoomCandidatesByName(mcpClient, query, correlationId, session
   }, correlationId, sessionId);
 
   const rooms = _extractRoomsFromFindRoomsResult(resp);
-  return _normalizeRoomCandidates(rooms, 12);
+  const candidates = _normalizeRoomCandidates(rooms, 12);
+  if (candidates.length) return candidates;
+
+  // Fallback: on some deployments the c4_find_rooms response wrapper shape can differ.
+  // If we can't extract candidates, pull the full room list and filter locally.
+  const listResp = await mcpClient.sendCommand({
+    tool: 'c4_list_rooms',
+    args: {},
+  }, correlationId, sessionId);
+
+  const listedRooms = _extractRoomsFromListRoomsResult(listResp);
+  const allCandidates = _normalizeRoomCandidates(listedRooms, 200);
+  return _filterRoomCandidatesByQuery(allCandidates, query, 12);
 }
 
 async function buildRoomPresenceReport(mcpClient, roomChoice, correlationId, sessionId) {
