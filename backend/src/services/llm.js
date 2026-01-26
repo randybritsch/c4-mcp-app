@@ -12,10 +12,16 @@ async function fetchWithTimeout(url, options, timeoutMs) {
   }
 }
 
-/**
- * System prompt for intent parsing
- */
-const SYSTEM_PROMPT = `You are a smart home command planner.
+function buildSystemPrompt() {
+  const configuredScenes = Array.isArray(config?.scenes?.names) ? config.scenes.names : [];
+  const scenesBlock = configuredScenes.length
+    ? `\n\nKnown scene names (prefer these exactly when recommending a scene):\n${configuredScenes
+      .slice(0, 40)
+      .map((s) => `- ${s}`)
+      .join('\n')}`
+    : '';
+
+  return `You are a smart home command planner.
 Convert a user's natural language into a SINGLE Control4 tool call for the c4-mcp HTTP server.
 
 Return ONLY valid JSON in this exact shape:
@@ -35,6 +41,13 @@ Allowed tools (choose ONE):
 - c4_scene_activate_by_name
 - c4_scene_set_state_by_name
 - c4_list_rooms
+
+New capability: Mood / vibe requests
+- If the user expresses a mood or vibe (e.g. "I'm in a romantic mood", "make it cozy", "party mode", "set the mood"),
+  recommend an appropriate scene by returning tool c4_scene_activate_by_name.
+- If known scene names are provided, choose the best matching one from that list.
+- If no scene list is provided, choose a reasonable scene_name that reflects the mood
+  (examples: Romantic, Cozy, Relax, Party, Movie Time, Night).
 
 Rules:
 - Prefer c4_room_lights_set when the user mentions a room (e.g. "Basement").
@@ -92,6 +105,7 @@ Examples:
 "Pause" -> {"tool":"c4_tv_remote_last","args":{"button":"pause"}}
 "Play" -> {"tool":"c4_tv_remote_last","args":{"button":"play"}}
 "Activate Movie Time" -> {"tool":"c4_scene_activate_by_name","args":{"scene_name":"Movie Time"}}`;
+}
 
 /**
  * Parse intent using OpenAI
@@ -149,7 +163,7 @@ async function parseWithOpenAI(transcript, correlationId) {
     };
 
     const messages = [
-      { role: 'system', content: SYSTEM_PROMPT },
+      { role: 'system', content: buildSystemPrompt() },
       { role: 'user', content: transcript },
     ];
 

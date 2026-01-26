@@ -54,4 +54,54 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
       },
     });
   });
+
+  test('c4_scene_activate_by_name uses choice.name as scene_name', () => {
+    const originalIntent = {
+      tool: 'c4_scene_activate_by_name',
+      args: {
+        scene_name: 'Romantic',
+      },
+    };
+
+    const choice = {
+      name: 'Movie Time',
+    };
+
+    const refined = mcpClient.buildRefinedIntentFromChoice(originalIntent, choice);
+
+    expect(refined).toEqual({
+      tool: 'c4_scene_activate_by_name',
+      args: {
+        scene_name: 'Movie Time',
+        require_unique: true,
+        include_candidates: false,
+      },
+    });
+  });
+
+  test('c4_scene_set_state_by_name uses choice.name as scene_name', () => {
+    const originalIntent = {
+      tool: 'c4_scene_set_state_by_name',
+      args: {
+        scene_name: 'Relax',
+        state: 'on',
+      },
+    };
+
+    const choice = {
+      name: 'Romantic',
+    };
+
+    const refined = mcpClient.buildRefinedIntentFromChoice(originalIntent, choice);
+
+    expect(refined).toEqual({
+      tool: 'c4_scene_set_state_by_name',
+      args: {
+        state: 'on',
+        scene_name: 'Romantic',
+        require_unique: true,
+        include_candidates: false,
+      },
+    });
+  });
 });

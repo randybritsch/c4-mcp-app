@@ -177,6 +177,20 @@ class MCPClient {
       return { tool, args };
     }
 
+    if (tool === 'c4_scene_activate_by_name') {
+      if (choice.name) {
+        args.scene_name = String(choice.name);
+      }
+      return { tool, args };
+    }
+
+    if (tool === 'c4_scene_set_state_by_name') {
+      if (choice.name) {
+        args.scene_name = String(choice.name);
+      }
+      return { tool, args };
+    }
+
     // Scenes: keep as-is for now.
     return { tool, args };
   }

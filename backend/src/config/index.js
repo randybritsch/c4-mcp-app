@@ -40,6 +40,31 @@ const config = {
     },
   },
 
+  // Optional known scenes list for better LLM recommendations.
+  // Configure via SCENE_NAMES (CSV) or SCENE_NAMES_JSON (JSON array of strings).
+  scenes: {
+    names: (() => {
+      const rawJson = String(process.env.SCENE_NAMES_JSON || '').trim();
+      if (rawJson) {
+        try {
+          const parsed = JSON.parse(rawJson);
+          if (Array.isArray(parsed)) {
+            return parsed.map((s) => String(s).trim()).filter(Boolean);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
+      const rawCsv = String(process.env.SCENE_NAMES || '').trim();
+      if (!rawCsv) return [];
+      return rawCsv
+        .split(/[,;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+    })(),
+  },
+
   // Control4 MCP
   control4: {
     // This backend talks to the c4-mcp HTTP server (not directly to Director).
