@@ -111,6 +111,14 @@ async function main() {
     ? candidates.findIndex((c) => (c?.name || '').toLowerCase() === roomName.toLowerCase())
     : 0;
 
+  if (roomName && idx < 0) {
+    const names = candidates
+      .map((c) => c && c.name ? String(c.name) : null)
+      .filter(Boolean)
+      .slice(0, 25);
+    throw new Error(`Requested room not found: "${roomName}". Available (first ${names.length}): ${names.join(', ')}`);
+  }
+
   const choiceIndex = idx >= 0 ? idx : 0;
   console.log('Choosing:', choiceIndex, candidates[choiceIndex]?.name);
 
