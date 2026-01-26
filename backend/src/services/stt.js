@@ -69,20 +69,14 @@ async function transcribeWithGoogle(audioBase64, format, correlationId, sampleRa
       throw new Error(message || 'STT API error');
     }
 
-    if (!data.results || data.results.length === 0) {
-      return {
-        transcript: '',
-        confidence: 0,
-      };
-    }
+    const firstResult = data && data.results && Array.isArray(data.results) ? data.results[0] : null;
+    const firstAlt = firstResult && Array.isArray(firstResult.alternatives) ? firstResult.alternatives[0] : null;
 
-    const result = data.results[0];
-    const alternative = result.alternatives[0];
+    const transcript = typeof firstAlt?.transcript === 'string' ? firstAlt.transcript : '';
+    const confidenceRaw = firstAlt && typeof firstAlt.confidence !== 'undefined' ? Number(firstAlt.confidence) : 0;
+    const confidence = Number.isFinite(confidenceRaw) ? confidenceRaw : 0;
 
-    return {
-      transcript: alternative.transcript,
-      confidence: alternative.confidence || 0,
-    };
+    return { transcript, confidence };
   } catch (error) {
     if (error && error.name === 'AbortError') {
       const timeoutMs = config.stt.timeoutMs || 15000;
@@ -152,14 +146,22 @@ async function transcribeAudio(audioBase64, format, correlationId, sampleRateHer
 
   const duration = Date.now() - startTime;
 
+  const normalizedTranscript = typeof result?.transcript === 'string' ? result.transcript : '';
+  const normalizedConfidenceRaw = typeof result?.confidence !== 'undefined' ? Number(result.confidence) : 0;
+  const normalizedConfidence = Number.isFinite(normalizedConfidenceRaw) ? normalizedConfidenceRaw : 0;
+
   logger.info('Transcription complete', {
     correlationId,
     duration,
-    confidence: result.confidence,
-    transcriptLength: result.transcript.length,
+    confidence: normalizedConfidence,
+    transcriptLength: normalizedTranscript.length,
   });
 
-  return result;
+  return {
+    ...result,
+    transcript: normalizedTranscript,
+    confidence: normalizedConfidence,
+  };
 }
 
 module.exports = {
