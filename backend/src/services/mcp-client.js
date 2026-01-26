@@ -232,11 +232,16 @@ class MCPClient {
       'c4_scene_set_state_by_name',
       'c4_room_listen_by_name',
       'c4_list_rooms',
+      'c4_find_rooms',
       // Read-only inventory/state tools used for follow-up memory validation.
       'c4_list_devices',
       'c4_find_devices',
       'c4_resolve_device',
       'c4_light_get_state',
+      'c4_light_get_level',
+      'c4_room_watch_status',
+      'c4_room_listen_status',
+      'c4_room_now_playing',
       // Useful for debugging/ops; safe by default.
       'c4_memory_get',
       'c4_memory_clear',
