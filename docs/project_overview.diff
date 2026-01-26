@@ -1,0 +1,88 @@
+diff --git a/docs/project_overview.md b/docs/project_overview.md
+index 350cf53..2f97fec 100644
+--- a/docs/project_overview.md
++++ b/docs/project_overview.md
+@@ -1,7 +1,7 @@
+ # Project Overview: C4-MCP-App
+ 
+ **Version:** 1.0.0  
+-**Last Updated:** January 23, 2026  
++**Last Updated:** January 26, 2026  
+ **Status:** ✅ DEPLOYED - Running in Production
+ 
+ ---
+@@ -290,6 +290,8 @@ c4-mcp-app/
+ 
+ Session context is provided to `c4-mcp` via the `X-Session-Id` request header (the backend uses the deviceId) so follow-ups can be resolved using tools like `c4_lights_set_last`, `c4_tv_off_last`, and `c4_tv_remote_last`.
+ 
++For clarification retries, the backend should prefer stable identifiers (e.g., `room_id`) when available rather than re-sending the original ambiguous `room_name`.
++
+ **WebSocket Response Stream:**
+ ```json
+ {
+@@ -382,9 +384,9 @@ Response:
+ 
+ ### ADR-005: Node.js for Backend (Tentative)
+ - **Context:** Need lightweight backend service on DS218+
+-- **Decision:** Node.js over Python (pending validation)
++- **Decision:** Use Node.js over Python for the backend service
+ - **Rationale:** Lower memory footprint, better async I/O, faster startup
+-- **Consequences:** May revisit if Python integration with MCP server is significantly easier
++- **Consequences:** Keep service boundaries strict (backend orchestrates; `c4-mcp` owns Control4 integration)
+ 
+ ### ADR-006: Home-Grade Security
+ - **Context:** Private home use, not enterprise
+@@ -649,11 +651,10 @@ Response:
+ 
+ ### 12.2 Unknowns
+ 
+-- **MCP Server API:** Exact endpoints, authentication, and payload formats (requires documentation or reverse engineering)
+-- **Control4 Device IDs:** How to map user-friendly names ("living room lights") to device IDs
+-- **Voice Input Quality:** Actual performance of browser MediaRecorder API on target devices
+-- **Synology Task Scheduler Reliability:** Will process restart on failure? Need to test.
+-- **Cloud API Costs:** Exact cost per command (depends on usage patterns)
++- **Cloud STT accuracy and latency:** Real-world performance varies by device, mic, and environment
++- **Cloud LLM variability:** Rare edge cases where the model proposes incorrect or incomplete tool args
++- **Reverse proxy behavior under load:** WebSocket upgrades/timeouts vary by DSM configuration and networks
++- **Cloud API costs:** Exact cost per command depends on usage patterns and model/provider
+ 
+ ### 12.3 Assumptions
+ 
+@@ -671,17 +672,19 @@ Response:
+ ### 13.1 Short-Term (0–2 Weeks)
+ 
+ - [x] Initialize project repository and documentation
+-- [ ] Design REST API contract and WebSocket protocol
+-- [ ] Create basic PWA shell (HTML, CSS, JS scaffolding)
++- [x] Design REST API contract and WebSocket protocol
++- [x] Create basic PWA shell (HTML, CSS, JS scaffolding)
+ - [x] Implement backend service scaffold (Node.js)
+-- [ ] Integrate cloud STT API (proof-of-concept)
+-- [ ] Integrate cloud LLM API (proof-of-concept)
+-- [ ] Create MCP client module (mock MCP server for testing)
++- [x] Integrate cloud STT API
++- [x] Integrate cloud LLM API
++- [x] Create MCP client module
+ - [ ] Implement voice input in PWA (MediaRecorder + WAV fallback)
+-- [ ] Deploy MVP to Synology DS218+ (manual deployment)
++- [x] Implement voice input in PWA (MediaRecorder + WAV fallback)
++- [x] Deploy MVP to Synology DS218+ (Container Manager / Compose)
+ 
+ ### 13.2 Mid-Term (2–8 Weeks)
+ 
++- [ ] Refactor toward a more “typical MCP” app layout (clearer domain modules, smaller files, stricter contracts) without breaking the existing external API/WS protocol. Start from current known-good HEAD; tag/branch a refactor baseline first for rollback/diffing; refactor in small slices and keep Jest + ESLint green after each slice.
+ - [ ] Add device discovery and status endpoints
+ - [ ] Implement confirmation flow for high-risk actions (locks, garage)
+ - [ ] Add action logging and history view in PWA
+@@ -767,6 +770,11 @@ Response:
+   - **LLM**: OpenAI; tested with `gpt-4o-mini`
+   - **Feature**: interactive ambiguity clarification loop (`clarification-required` / `clarification-choice`)
+ 
++- 2026-01-26: Baseline stabilization
++  - **Clarification**: prefer stable IDs (e.g., `room_id`) on retry to reduce repeated prompts
++  - **Quality**: Jest tests + lint kept green; ignore rules updated to avoid committing NAS staging/snapshots
++  - **Ops**: runbook refined for NAS debugging workflows
++
+ ---
+ 
+ *This document is a living artifact. Keep it updated as the system evolves.*

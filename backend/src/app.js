@@ -12,12 +12,16 @@ const voiceRoutes = require('./routes/voice');
 
 const app = express();
 
+if (config.trustProxy) {
+  app.set('trust proxy', 1);
+}
+
 // Security middleware
 app.use(helmet());
 app.use(cors({ origin: config.cors.origin }));
 
 // Rate limiting
-const limiter = rateLimit({
+const limiterOptions = {
   windowMs: config.rateLimit.windowMs,
   max: config.rateLimit.maxRequests,
   message: {
@@ -26,7 +30,13 @@ const limiter = rateLimit({
       message: 'Too many requests, please try again later',
     },
   },
-});
+};
+
+if (!config.trustProxy) {
+  limiterOptions.validate = { xForwardedForHeader: false };
+}
+
+const limiter = rateLimit(limiterOptions);
 app.use('/api/', limiter);
 
 // Body parsing

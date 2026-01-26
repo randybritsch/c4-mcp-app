@@ -1,7 +1,6 @@
-
 # PROJECT BOOTSTRAP SUMMARY — c4-mcp-app
 
-**Last Updated:** January 23, 2026
+**Last Updated:** January 26, 2026
 
 **1) One-line purpose**
 Provide a lightweight **voice + text** interface for Control4: a PWA frontend talks to a Node.js backend that converts natural language into deterministic `c4-mcp` tool calls and streams progress/results over WebSocket.
@@ -11,7 +10,7 @@ Provide a lightweight **voice + text** interface for Control4: a PWA frontend ta
 - **Backend (Node/Express)**: REST API + WebSocket server (container port 3000; NAS commonly exposes host `:3002`).
 - **Cloud AI**: STT (Google/Azure) → transcript; LLM (OpenAI by default) → structured `{ tool, args }` plan.
 - **Control4 bridge**: backend calls a separate `c4-mcp` HTTP server via `C4_MCP_BASE_URL` (no shared code between repos).
-- **Clarification UX**: ambiguous tool results become `clarification-required`; UI replies with `clarification-choice`; backend rebuilds args and retries.
+- **Clarification UX**: ambiguous tool results become `clarification-required`; UI replies with `clarification-choice`; backend rebuilds args (preferring stable IDs like `room_id` when available) and retries.
 - **Production routing**: Synology reverse proxy terminates HTTPS/WSS; `/api/*` and `/ws` must support WebSocket upgrade.
 
 **3) Key modules and roles (bullet list)**
@@ -50,7 +49,7 @@ Provide a lightweight **voice + text** interface for Control4: a PWA frontend ta
 **7) Current priorities (Top 5)**
 1. Keep end-to-end reliability on NAS (HTTPS + WSS reverse proxy; avoid mixed-content).
 2. Ensure mobile voice capture works broadly (MediaRecorder + WAV fallback).
-3. Keep clarification flows correct (room vs device vs source) and avoid “stuck executing”.
+3. Keep clarification flows correct (room vs device vs source) and avoid “stuck executing” (retry must be schema-valid).
 4. Maintain timeouts on MCP calls to prevent indefinite hangs.
 5. Keep deploys repeatable (compose, health checks, and clear env templates).
 

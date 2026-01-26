@@ -1,6 +1,7 @@
 const { transcribeAudio } = require('./stt');
 const { parseIntent } = require('./llm');
 const mcpClient = require('./mcp-client');
+const { executePlannedCommand } = require('./command-orchestrator');
 const logger = require('../utils/logger');
 const { AppError, ErrorCodes } = require('../utils/errors');
 
@@ -29,7 +30,11 @@ async function processVoiceCommand(audioData, format, correlationId, sessionId) 
 
     // Step 3: Execute tool call via c4-mcp (HTTP)
     logger.info('Step 3: Executing MCP command', { correlationId });
-    const mcpResult = await mcpClient.sendCommand(plan, correlationId, sessionId);
+    const { command: mcpResult } = await executePlannedCommand(plan, {
+      correlationId,
+      sessionId,
+      mcpClient,
+    });
 
     const totalDuration = Date.now() - startTime;
 

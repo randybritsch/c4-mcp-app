@@ -2,7 +2,7 @@
 
 **Project:** C4-MCP-App  
 **Version:** 1.0.0  
-**Last Updated:** January 23, 2026
+**Last Updated:** January 26, 2026
 
 > [← Back to Project Overview](../project_overview.md)
 
@@ -534,8 +534,10 @@ Sent when the MCP command was ambiguous and needs a user choice.
 Starts an audio capture session.
 
 ```json
-{ "type": "audio-start" }
+{ "type": "audio-start", "format": "webm", "sampleRateHertz": 16000 }
 ```
+
+`format` and `sampleRateHertz` are optional. If omitted, the server defaults to `format="webm"`.
 
 #### audio-chunk
 
@@ -565,6 +567,12 @@ Sends the selected candidate index from `clarification-required`.
 
 ```json
 { "type": "ping" }
+```
+
+Server response:
+
+```json
+{ "type": "pong" }
 ```
 
 ---
@@ -714,5 +722,5 @@ Retry-After: 30
 ---
 
 **Maintained By:** Randy Britsch  
-**Last Updated:** January 19, 2026  
+**Last Updated:** January 26, 2026  
 **API Version:** v1.0.0

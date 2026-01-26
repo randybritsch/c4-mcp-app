@@ -64,6 +64,7 @@ router.post('/process-text', authMiddleware, async (req, res, next) => {
     // Reuse the same pipeline but skip STT.
     const { parseIntent } = require('../services/llm');
     const mcpClient = require('../services/mcp-client');
+    const { executePlannedCommand } = require('../services/command-orchestrator');
 
     let plan;
     if (planOverride !== undefined && planOverride !== null) {
@@ -97,7 +98,11 @@ router.post('/process-text', authMiddleware, async (req, res, next) => {
       plan = await parseIntent(transcript, req.correlationId);
     }
 
-    const command = await mcpClient.sendCommand(plan, req.correlationId, req.user.deviceId);
+    const { command } = await executePlannedCommand(plan, {
+      correlationId: req.correlationId,
+      sessionId: req.user.deviceId,
+      mcpClient,
+    });
 
     res.json({
       transcript,

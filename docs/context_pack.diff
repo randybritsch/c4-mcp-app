@@ -1,0 +1,47 @@
+diff --git a/docs/context_pack.md b/docs/context_pack.md
+index eda76ce..833b051 100644
+--- a/docs/context_pack.md
++++ b/docs/context_pack.md
+@@ -1,8 +1,8 @@
+ # Context Pack — c4-mcp-app (C4 Voice Control)
+ 
+-**Last Updated:** January 23, 2026
++**Last Updated:** January 26, 2026
+ 
+-**Deployment (NAS static IP):** `192.168.1.237`
++**Deployment (current / may change):** NAS static IP `192.168.1.237`
+ 
+ - Backend REST base URL: `http://192.168.1.237:3002`
+ - Backend WebSocket URL: `ws://192.168.1.237:3002/ws?token=<jwt>`
+@@ -20,7 +20,9 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
+ - Decoupled boundary: only HTTP calls to `c4-mcp` (no shared code; configured via `C4_MCP_BASE_URL`).
+ - Session context: backend sends `X-Session-Id: <deviceId>` to `c4-mcp` for follow-ups.
+ - Ambiguity UX: backend emits `clarification-required`, UI replies `clarification-choice`, backend retries with scoped args.
++- Clarification retry rule: prefer stable identifiers (e.g., `room_id`) when available; avoid re-sending ambiguous `room_name`.
+ - Anti-hang: backend enforces `C4_MCP_TIMEOUT_MS` and UI has a watchdog for stuck “executing”.
++- Refactor direction: move toward a more “typical MCP” app layout (clearer domain modules + strict contracts) without breaking REST/WS payloads.
+ 
+ ## Current working set (3–7 files/modules)
+ 
+@@ -72,12 +74,21 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
+ - “Turn off the TV” then “mute it” succeeds in the same browser session.
+ - Follow-up resolution uses `X-Session-Id` + `*_last` tools (no state duplication in this repo).
+ 
++**Objective D — Prepare the “typical MCP” refactor safely (no contract breaks)**
++
++- Identify/lock the external contracts (REST + WS event names + backend→`c4-mcp` payload shape).
++- Acceptance: existing flows (voice, text, clarification) behave identically; Jest + ESLint stay green.
++- Start from current known-good HEAD; only rewind to an older commit if you have a specific regression you’re escaping.
++- Before refactor code changes: create a baseline tag/branch (e.g., `refactor-baseline-2026-01-26`) for quick rollback and diffing.
++- Refactor in small, testable slices; re-run Jest + ESLint after each slice.
++
+ ## Guardrails block (from conventions)
+ 
+ - Node.js: compatible with Node 18+; avoid native addons.
+ - Keep repos decoupled: never add shared code that couples `c4-mcp-app` to `c4-mcp` internals.
+ - Do not re-implement memory here; always rely on `c4-mcp` session memory via `X-Session-Id`.
+ - Do not break REST/WS/MCP payload shapes; changes must be additive and backwards-compatible.
++- Refactor direction: restructure internals (module boundaries, file sizes, clearer orchestration) but keep the wire contracts stable.
+ - Keep all tool executions bounded: enforce `C4_MCP_TIMEOUT_MS`; never allow indefinite hangs.
+ - No secrets in git; only `.env`/deployment secrets stores.
+ - Keep tests/lint green (Jest + ESLint) for any backend changes.
