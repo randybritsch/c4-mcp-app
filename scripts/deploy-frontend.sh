@@ -4,19 +4,24 @@
 echo "=== C4-MCP-App Frontend Deployment ==="
 
 # Configuration
-WEB_DIR="/volume1/web/c4-voice"
+# IMPORTANT: Avoid deploying into /volume1/web root.
+# Synology manages special folders there (e.g. @eaDir, web_images) which can cause rsync permission errors.
+WEB_DIR="/volume1/web/c4-mcp-app"
 
 # Create web directory if it doesn't exist
 mkdir -p "$WEB_DIR"
 
 # Step 1: Copy frontend files
 echo "Step 1: Deploying frontend files..."
-rsync -av ./frontend/ "$WEB_DIR/"
+rsync -av \
+	--no-perms --no-owner --no-group --omit-dir-times --no-times \
+	--exclude='@eaDir' --exclude='web_images' \
+	./frontend/ "$WEB_DIR/"
 
 # Step 2: Set permissions
 echo "Step 2: Setting permissions..."
-chown -R http:http "$WEB_DIR"
-chmod -R 755 "$WEB_DIR"
+chown -R http:http "$WEB_DIR" || true
+chmod -R 755 "$WEB_DIR" || true
 
 # Step 3: Configuration reminder
 echo "Step 3: Frontend deployment complete!"

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'c4-voice-v3';
+const CACHE_NAME = 'c4-voice-v4';
 const urlsToCache = [
   '/',
   '/index.html',

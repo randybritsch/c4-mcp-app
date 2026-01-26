@@ -4,6 +4,7 @@ async function handleClarificationChoice(ws, message, {
   mcpClient,
   roomAliases,
 } = {}) {
+  const { isMoodPlan } = require('./pending-plans');
   if (!ws || !wsMessages || !mcpClient || !roomAliases) {
     throw new Error('ws-clarification: missing dependencies');
   }
@@ -77,7 +78,7 @@ async function handleClarificationChoice(ws, message, {
   }
 
   // Optional multi-step plan after clarification.
-  if (pendingPlan && pendingPlan.kind === 'mood') {
+  if (isMoodPlan(pendingPlan)) {
     let musicResult = null;
     const musicSource = pendingPlan.music && pendingPlan.music.source_device_name
       ? String(pendingPlan.music.source_device_name).trim()

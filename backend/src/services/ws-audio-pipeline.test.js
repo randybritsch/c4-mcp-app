@@ -1,4 +1,17 @@
-const { processAudioStream } = require('./ws-audio-pipeline');
+function loadProcessAudioStreamWithEnv(env) {
+  const prev = { ...process.env };
+  Object.assign(process.env, env || {});
+  jest.resetModules();
+  // eslint-disable-next-line global-require
+  const { processAudioStream } = require('./ws-audio-pipeline');
+
+  const restore = () => {
+    process.env = prev;
+    jest.resetModules();
+  };
+
+  return { processAudioStream, restore };
+}
 
 function makeWs() {
   return {
@@ -13,6 +26,12 @@ function makeWs() {
 
 describe('ws-audio-pipeline room-group auto-resolution', () => {
   test('auto-resolves room ambiguity for bulk lights command and returns command-complete', async () => {
+    const { processAudioStream, restore } = loadProcessAudioStreamWithEnv({
+      MOOD_PLANS_ENABLED: '',
+      MOOD_MUSIC_ENABLED: '',
+      MOOD_MUSIC_SOURCE_NAME: '',
+    });
+
     const ws = makeWs();
 
     const wsMessages = {
@@ -82,6 +101,8 @@ describe('ws-audio-pipeline room-group auto-resolution', () => {
       roomAliases,
     });
 
+    restore();
+
     expect(wsMessages.sendClarificationRequired).not.toHaveBeenCalled();
     expect(wsMessages.sendCommandComplete).toHaveBeenCalledTimes(1);
 
@@ -97,5 +118,97 @@ describe('ws-audio-pipeline room-group auto-resolution', () => {
 
     // sendCommand called once for the initial attempt + once per candidate
     expect(mcpClient.sendCommand).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('ws-audio-pipeline mood recommendation', () => {
+  test('sends clarification-required with custom prompt and room candidates (no LLM parse)', async () => {
+    const { processAudioStream, restore } = loadProcessAudioStreamWithEnv({
+      MOOD_PLANS_ENABLED: 'true',
+      MOOD_MUSIC_ENABLED: 'true',
+      MOOD_MUSIC_SOURCE_NAME: 'Spotify',
+    });
+
+    const ws = makeWs();
+
+    const wsMessages = {
+      sendError: jest.fn(),
+      sendProcessing: jest.fn(),
+      sendTranscript: jest.fn(),
+      sendIntent: jest.fn(),
+      sendClarificationRequired: jest.fn(),
+      sendCommandComplete: jest.fn(),
+    };
+
+    const logger = {
+      info: jest.fn(),
+      error: jest.fn(),
+    };
+
+    const transcribeAudio = jest.fn().mockResolvedValue({
+      transcript: "I'm in a romantic mood",
+      confidence: 0.9,
+    });
+
+    const parseIntent = jest.fn();
+
+    const mcpClient = {
+      sendCommand: jest.fn().mockResolvedValue({
+        success: true,
+        result: {
+          result: {
+            rooms: [
+              { name: 'Family Room', id: 101 },
+              { name: 'Kitchen', id: 102 },
+            ],
+          },
+        },
+      }),
+      buildRefinedIntentFromChoice: jest.fn(),
+    };
+
+    const roomAliases = {
+      applyRoomAliasToIntent: jest.fn(),
+    };
+
+    await processAudioStream(ws, {
+      logger,
+      wsMessages,
+      transcribeAudio,
+      parseIntent,
+      mcpClient,
+      roomAliases,
+    });
+
+    expect(parseIntent).not.toHaveBeenCalled();
+    expect(wsMessages.sendClarificationRequired).toHaveBeenCalledTimes(1);
+
+    const [_wsArg, transcript, intent, clarification] = wsMessages.sendClarificationRequired.mock.calls[0];
+    expect(transcript).toBe("I'm in a romantic mood");
+    expect(intent).toEqual({
+      tool: 'c4_room_lights_set',
+      args: expect.objectContaining({ level: expect.any(Number) }),
+    });
+    expect(clarification).toEqual(
+      expect.objectContaining({
+        kind: 'room',
+        prompt: expect.stringContaining('Which room'),
+        candidates: [
+          expect.objectContaining({ name: 'Family Room' }),
+          expect.objectContaining({ name: 'Kitchen' }),
+        ],
+      }),
+    );
+
+    expect(ws.pendingClarification && ws.pendingClarification.plan).toEqual(
+      expect.objectContaining({
+        kind: 'mood',
+        mood: 'romantic',
+        lights: expect.any(Object),
+        music: expect.objectContaining({ source_device_name: 'Spotify' }),
+      }),
+    );
+
+    restore();
   });
 });

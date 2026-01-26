@@ -7,6 +7,7 @@ async function processAudioStream(ws, {
   roomAliases,
 } = {}) {
   const config = require('../config');
+  const { buildMoodPlan } = require('./pending-plans');
 
   const shouldAutoResolveRoomGroup = (transcript, originalIntent, clarification) => {
     if (!transcript || typeof transcript !== 'string') return false;
@@ -182,12 +183,11 @@ async function processAudioStream(ws, {
           transcript: sttResult.transcript,
           intent: intentForChoice,
           clarification,
-          plan: {
-            kind: 'mood',
+          plan: buildMoodPlan({
             mood: mood.kind,
-            lights: { level: intentForChoice.args.level },
-            music: wantsMusic ? { source_device_name: String(config.mood.music.defaultSourceName).trim() } : null,
-          },
+            lightsLevel: intentForChoice.args.level,
+            musicSourceName: wantsMusic ? String(config.mood.music.defaultSourceName).trim() : '',
+          }),
         };
 
         wsMessages.sendClarificationRequired(ws, sttResult.transcript, intentForChoice, clarification);

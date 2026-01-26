@@ -166,10 +166,11 @@ From development machine:
 
 ```bash
 # Backend
-scp -r backend/ admin@<NAS_IP>:/volume1/apps/c4-mcp-app/backend-new/
+rsync -av --exclude=.env --exclude=node_modules -e ssh backend/ admin@<NAS_IP>:/volume1/apps/c4-mcp-app/backend-new/
 
 # Frontend
-scp -r frontend/ admin@<NAS_IP>:/volume1/web/c4-mcp-app/frontend-new/
+# NOTE: Avoid deploying into /volume1/web root (Synology-managed folders like @eaDir/web_images can break rsync).
+rsync -av --no-perms --no-owner --no-group --omit-dir-times --no-times -e ssh frontend/ admin@<NAS_IP>:/volume1/web/c4-mcp-app/frontend-new/
 ```
 
 #### Step 3: Install Dependencies
@@ -243,6 +244,11 @@ tail -f /var/log/c4-mcp-app.log
 # Submit test command "Turn on living room lights"
 ```
 
+Tip: PWA caching can mask updates
+
+- If you update JS/HTML and don’t see changes on iOS/Safari, the Service Worker may be serving cached assets.
+- Bump the cache version in `frontend/service-worker.js` (CACHE_NAME) and reload, or remove the PWA from the home screen and re-add it.
+
 #### Step 9: Monitor for 15 Minutes
 
 - Watch logs for errors
@@ -282,8 +288,8 @@ ssh admin@$NAS_IP "cd /volume1/apps/c4-mcp-app && tar -czf /volume1/backups/c4-m
 
 # Step 2: Upload
 echo "[2/9] Uploading new code..."
-scp -r backend/ admin@$NAS_IP:/volume1/apps/c4-mcp-app/backend-new/
-scp -r frontend/ admin@$NAS_IP:/volume1/web/c4-mcp-app/frontend-new/
+rsync -av --exclude=.env --exclude=node_modules -e ssh backend/ admin@$NAS_IP:/volume1/apps/c4-mcp-app/backend-new/
+rsync -av --no-perms --no-owner --no-group --omit-dir-times --no-times -e ssh frontend/ admin@$NAS_IP:/volume1/web/c4-mcp-app/frontend-new/
 
 # Step 3: Install dependencies
 echo "[3/9] Installing dependencies..."
