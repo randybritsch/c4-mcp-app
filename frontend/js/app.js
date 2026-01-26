@@ -14,10 +14,14 @@ class App {
       clarificationLabel: document.getElementById('clarificationLabel'),
       clarificationChoices: document.getElementById('clarificationChoices'),
       commandLog: document.getElementById('commandLog'),
+      currentRoomBanner: document.getElementById('currentRoomBanner'),
     };
 
     this.commandHistory = [];
     this.isRecording = false;
+
+    this.currentRoom = null;
+    this._pendingRoomCandidates = null;
 
     // When the recorder auto-stops (silence detected), update UI state.
     if (typeof voiceRecorder !== 'undefined') {
@@ -32,6 +36,60 @@ class App {
     if (this.elements.statusMessage) {
       this.elements.statusMessage.style.whiteSpace = 'pre-wrap';
     }
+  }
+
+  _extractRoomFromMessage(message) {
+    if (!message || typeof message !== 'object') return null;
+
+    const roomObj = message.room && typeof message.room === 'object' ? message.room : null;
+
+    const roomName =
+      (roomObj && (roomObj.room_name || roomObj.name || roomObj.roomName))
+      || message.room_name
+      || (message.result && message.result.aggregate && (message.result.aggregate.room_name || message.result.aggregate.roomName))
+      || (message.result && (message.result.room_name || message.result.roomName))
+      || (message.intent && message.intent.args && message.intent.args.room_name)
+      || null;
+
+    const roomId =
+      (roomObj && (roomObj.room_id ?? roomObj.roomId ?? roomObj.id))
+      || message.room_id
+      || (message.result && message.result.aggregate && (message.result.aggregate.room_id ?? message.result.aggregate.roomId))
+      || (message.result && (message.result.room_id ?? message.result.roomId))
+      || (message.intent && message.intent.args && (message.intent.args.room_id ?? message.intent.args.roomId))
+      || null;
+
+    if (!roomName) return null;
+    return {
+      room_name: String(roomName),
+      room_id: roomId !== null && roomId !== undefined ? Number(roomId) : null,
+    };
+  }
+
+  setCurrentRoom(room) {
+    if (!this.elements.currentRoomBanner) return;
+    if (!room || !room.room_name) {
+      this.currentRoom = null;
+      this.elements.currentRoomBanner.style.display = 'none';
+      this.elements.currentRoomBanner.innerHTML = '';
+      return;
+    }
+
+    this.currentRoom = {
+      room_name: String(room.room_name),
+      room_id: room.room_id !== null && room.room_id !== undefined ? Number(room.room_id) : null,
+    };
+
+    const nameEsc = this.currentRoom.room_name
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+    this.elements.currentRoomBanner.innerHTML =
+      `<span class="room-label">Room:</span> <span class="room-name">${nameEsc}</span>`;
+    this.elements.currentRoomBanner.style.display = 'inline-flex';
   }
 
   _formatError(err) {
@@ -152,6 +210,11 @@ class App {
 
     wsClient.on('intent', (message) => {
       console.log('Intent parsed:', message.intent);
+    });
+
+    wsClient.on('room-context', (message) => {
+      const room = this._extractRoomFromMessage(message);
+      if (room) this.setCurrentRoom(room);
     });
 
     wsClient.on('command-complete', (message) => {
@@ -276,6 +339,9 @@ class App {
   handleCommandComplete(message) {
     this.updateStatusMessage('Command executed successfully!');
 
+    const inferredRoom = this._extractRoomFromMessage(message);
+    if (inferredRoom) this.setCurrentRoom(inferredRoom);
+
     // Clear any pending clarification UI.
     this.hideClarification();
     
@@ -330,6 +396,8 @@ class App {
 
     this.elements.clarificationChoices.innerHTML = '';
 
+    this._pendingRoomCandidates = (kind === 'room') ? clarification.candidates : null;
+
     clarification.candidates.forEach((c, idx) => {
       const btn = document.createElement('button');
       btn.className = 'clarification-choice-btn';
@@ -339,6 +407,11 @@ class App {
         // Disable all buttons while executing.
         Array.from(this.elements.clarificationChoices.querySelectorAll('button')).forEach((b) => (b.disabled = true));
         this.updateStatusMessage('Executing...');
+
+        // Optimistically update the room banner for room clarifications.
+        if (kind === 'room' && c && c.name) {
+          this.setCurrentRoom({ room_name: c.name, room_id: c.room_id ?? null });
+        }
         wsClient.send({ type: 'clarification-choice', choiceIndex: idx });
       });
       this.elements.clarificationChoices.appendChild(btn);

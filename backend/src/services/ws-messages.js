@@ -69,6 +69,30 @@ function sendCommandComplete(ws, result, transcript, intent) {
   });
 }
 
+function sendRoomContext(ws, room, source) {
+  if (!room || typeof room !== 'object') return;
+  const roomName = room.room_name || room.name || room.roomName;
+  if (!roomName) return;
+
+  const roomId = room.room_id !== undefined ? room.room_id
+    : room.roomId !== undefined ? room.roomId
+      : room.id !== undefined ? room.id
+        : null;
+
+  const payload = {
+    type: 'room-context',
+    room: {
+      room_name: String(roomName),
+      room_id: roomId !== null && roomId !== undefined ? Number(roomId) : null,
+    },
+    updatedAt: room.updatedAt || new Date().toISOString(),
+  };
+
+  if (source) payload.source = String(source);
+
+  sendJson(ws, payload);
+}
+
 function sendError(ws, { code, message, details } = {}) {
   const payload = {
     type: 'error',
@@ -91,5 +115,6 @@ module.exports = {
   sendIntent,
   sendClarificationRequired,
   sendCommandComplete,
+  sendRoomContext,
   sendError,
 };

@@ -42,10 +42,26 @@ async function handleClarificationChoice(ws, message, {
       updatedAt: new Date().toISOString(),
     };
 
+    if (typeof wsMessages.sendRoomContext === 'function') {
+      wsMessages.sendRoomContext(ws, ws.currentRoom, 'presence');
+    }
+
     const report = await buildRoomPresenceReport(mcpClient, choice, ws.correlationId, ws.user?.deviceId);
     wsMessages.sendCommandComplete(ws, report, transcript, { tool: 'c4_room_presence', args: { room_id: ws.currentRoom.room_id } });
     ws.pendingClarification = null;
     return;
+  }
+
+  // For any room clarification, treat the selected room as the active room context.
+  if (clarification && String(clarification.kind || '') === 'room' && choice && choice.name) {
+    ws.currentRoom = {
+      room_id: choice && choice.room_id !== undefined && choice.room_id !== null ? Number(choice.room_id) : null,
+      room_name: String(choice.name),
+      updatedAt: new Date().toISOString(),
+    };
+    if (typeof wsMessages.sendRoomContext === 'function') {
+      wsMessages.sendRoomContext(ws, ws.currentRoom, 'clarification');
+    }
   }
 
   // Remember room clarifications per-device so repeated commands like
@@ -97,6 +113,18 @@ async function handleClarificationChoice(ws, message, {
 
   // Optional multi-step plan after clarification.
   if (isMoodPlan(pendingPlan)) {
+    // Mood plans are explicitly room-based.
+    if (choice && choice.name) {
+      ws.currentRoom = {
+        room_id: choice && choice.room_id !== undefined && choice.room_id !== null ? Number(choice.room_id) : null,
+        room_name: String(choice.name),
+        updatedAt: new Date().toISOString(),
+      };
+      if (typeof wsMessages.sendRoomContext === 'function') {
+        wsMessages.sendRoomContext(ws, ws.currentRoom, 'mood');
+      }
+    }
+
     let musicResult = null;
     const musicSource = pendingPlan.music && pendingPlan.music.source_device_name
       ? String(pendingPlan.music.source_device_name).trim()

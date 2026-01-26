@@ -168,6 +168,10 @@ async function processTranscript(ws, transcript, {
           updatedAt: new Date().toISOString(),
         };
 
+        if (typeof wsMessages.sendRoomContext === 'function') {
+          wsMessages.sendRoomContext(ws, ws.currentRoom, 'presence');
+        }
+
         const report = await buildRoomPresenceReport(mcpClient, choice, ws.correlationId, ws.user?.deviceId);
         wsMessages.sendCommandComplete(ws, report, safeTranscript, { tool: 'c4_room_presence', args: { room_id: ws.currentRoom.room_id } });
         ws.audioChunks = [];
@@ -266,6 +270,26 @@ async function processTranscript(ws, transcript, {
       ws,
       roomAliases,
     });
+
+    // Best-effort: if the user targeted a room explicitly, treat it as the active room.
+    // (This is separate from physical presence; it's "current context" for the UI.)
+    const intentRoomName = intent && intent.args && typeof intent.args.room_name === 'string'
+      ? intent.args.room_name.trim()
+      : '';
+    const intentRoomId = intent && intent.args && intent.args.room_id !== undefined && intent.args.room_id !== null
+      ? Number(intent.args.room_id)
+      : null;
+
+    if (intentRoomName) {
+      ws.currentRoom = {
+        room_id: intentRoomId,
+        room_name: intentRoomName,
+        updatedAt: new Date().toISOString(),
+      };
+      if (typeof wsMessages.sendRoomContext === 'function') {
+        wsMessages.sendRoomContext(ws, ws.currentRoom, 'intent');
+      }
+    }
 
     if (mcpResult && mcpResult.clarification) {
       if (shouldAutoResolveRoomGroup(safeTranscript, intent, mcpResult.clarification)) {
