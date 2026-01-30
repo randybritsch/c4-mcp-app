@@ -22,6 +22,99 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
 }
 
 /**
+ * Transcribe audio using a local Whisper HTTP service (OpenAI-compatible).
+ *
+ * Expected endpoint: POST {baseUrl}/v1/audio/transcriptions
+ *
+ * We send multipart/form-data with fields:
+ * - file: audio bytes (webm/ogg/wav)
+ * - model: whisper model name (service-dependent; default from config)
+ * - language: optional language hint
+ */
+async function transcribeWithWhisper(audioBase64, format, correlationId) {
+  const whisper = config?.stt?.whisper || {};
+  const baseUrl = String(whisper.baseUrl || '').trim().replace(/\/+$/, '');
+  const model = String(whisper.model || '').trim() || 'base.en';
+  const language = String(whisper.language || '').trim();
+  const apiKey = String(whisper.apiKey || '').trim();
+
+  if (!baseUrl) {
+    throw new AppError(
+      ErrorCodes.STT_ERROR,
+      'Whisper STT base URL not configured (set WHISPER_BASE_URL)',
+      500,
+    );
+  }
+
+  const formatLower = String(format || 'webm').toLowerCase();
+  const mimeMap = {
+    webm: 'audio/webm',
+    ogg: 'audio/ogg',
+    wav: 'audio/wav',
+    mp3: 'audio/mpeg',
+    m4a: 'audio/mp4',
+  };
+  const mime = mimeMap[formatLower] || 'application/octet-stream';
+  const filename = `audio.${formatLower || 'webm'}`;
+
+  try {
+    const url = `${baseUrl}/v1/audio/transcriptions`;
+    const timeoutMs = config.stt.timeoutMs || 15000;
+
+    const audioBytes = Buffer.from(audioBase64, 'base64');
+    const form = new FormData();
+    form.append('model', model);
+    if (language) form.append('language', language);
+    form.append('file', new Blob([audioBytes], { type: mime }), filename);
+
+    const headers = {};
+    if (apiKey) headers.Authorization = `Bearer ${apiKey}`;
+
+    const { resp, json: data } = await fetchJsonWithTimeout(
+      url,
+      {
+        method: 'POST',
+        headers,
+        body: form,
+      },
+      timeoutMs,
+    );
+
+    if (!resp.ok) {
+      const message = data && typeof data === 'object' ? (data.error?.message || data.message) : null;
+      throw new Error(message || `Whisper STT error (${resp.status})`);
+    }
+
+    const transcript = (() => {
+      if (data && typeof data === 'object') {
+        if (typeof data.text === 'string') return data.text;
+        if (typeof data.transcript === 'string') return data.transcript;
+      }
+      return '';
+    })();
+
+    return { transcript, confidence: 0 };
+  } catch (error) {
+    if (error && error.name === 'AbortError') {
+      const timeoutMs = config.stt.timeoutMs || 15000;
+      throw new AppError(
+        ErrorCodes.STT_TIMEOUT,
+        `Speech-to-text timed out after ${timeoutMs}ms`,
+        504,
+        { correlationId, timeoutMs, provider: 'whisper' },
+      );
+    }
+
+    logger.error('Whisper STT error', { correlationId, error: error.message });
+    throw new AppError(
+      ErrorCodes.STT_ERROR,
+      `Speech-to-text failed: ${error.message}`,
+      500,
+    );
+  }
+}
+
+/**
  * Transcribe audio using Google Speech-to-Text API
  */
 async function transcribeWithGoogle(audioBase64, format, correlationId, sampleRateHertz) {
@@ -134,6 +227,8 @@ async function transcribeAudio(audioBase64, format, correlationId, sampleRateHer
   let result;
   if (config.stt.provider === 'google') {
     result = await transcribeWithGoogle(audioBase64, format, correlationId, sampleRateHertz);
+  } else if (config.stt.provider === 'whisper' || config.stt.provider === 'local_whisper') {
+    result = await transcribeWithWhisper(audioBase64, format, correlationId);
   } else if (config.stt.provider === 'azure') {
     result = await transcribeWithAzure(audioBase64, format);
   } else {

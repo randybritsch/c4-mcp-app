@@ -20,6 +20,19 @@ const config = {
     google: {
       apiKey: process.env.GOOGLE_STT_API_KEY,
     },
+    whisper: {
+      // Local Whisper HTTP service (recommended):
+      // - Default resolves via docker-compose service name "whisper"
+      // - Endpoint expected: POST {baseUrl}/v1/audio/transcriptions (OpenAI-compatible)
+      baseUrl:
+        (process.env.WHISPER_BASE_URL
+          || process.env.STT_WHISPER_BASE_URL
+          || 'http://whisper:9000')
+          .replace(/\/+$/, ''),
+      apiKey: process.env.WHISPER_API_KEY || process.env.STT_WHISPER_API_KEY,
+      model: process.env.WHISPER_MODEL || 'base.en',
+      language: process.env.WHISPER_LANGUAGE || 'en',
+    },
     azure: {
       key: process.env.AZURE_STT_KEY,
       region: process.env.AZURE_STT_REGION || 'eastus',
@@ -30,9 +43,18 @@ const config = {
   llm: {
     provider: process.env.LLM_PROVIDER || 'openai',
     timeoutMs: parseInt(process.env.LLM_TIMEOUT_MS, 10) || 15000,
+    // If enabled, the backend may fall back to a small heuristic parser when the LLM is unavailable.
+    // Default is off to preserve the "Gemini decides" contract.
+    allowHeuristicsFallback: /^(1|true|yes)$/i.test(String(process.env.LLM_ALLOW_HEURISTICS_FALLBACK || '').trim()),
     openai: {
       apiKey: process.env.OPENAI_API_KEY,
       model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+    },
+    google: {
+      // Gemini API key (Google AI Studio). This is NOT the same as GOOGLE_STT_API_KEY.
+      apiKey: process.env.GOOGLE_GEMINI_API_KEY,
+      // Example models: gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash
+      model: process.env.GOOGLE_GEMINI_MODEL || 'gemini-1.5-flash',
     },
     anthropic: {
       apiKey: process.env.ANTHROPIC_API_KEY,

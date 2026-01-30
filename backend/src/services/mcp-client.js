@@ -5,6 +5,68 @@ const logger = require('../utils/logger');
 class MCPClient {
   constructor() {
     this._toolAllowlist = null;
+    this._toolCatalogCache = null;
+    this._toolCatalogCacheAtMs = 0;
+  }
+
+  getToolAllowlist() {
+    return Array.from(this._getToolAllowlist());
+  }
+
+  _extractToolsArrayFromListResponse(listResp) {
+    // Defensive normalization: upstream list response shapes can vary.
+    if (Array.isArray(listResp)) return listResp;
+
+    if (listResp && typeof listResp === 'object') {
+      if (Array.isArray(listResp.tools)) return listResp.tools;
+      if (listResp.tools && typeof listResp.tools === 'object') {
+        return Object.entries(listResp.tools).map(([name, spec]) => ({ name, ...(spec || {}) }));
+      }
+      if (Array.isArray(listResp.items)) return listResp.items;
+    }
+
+    return [];
+  }
+
+  _filterToolCatalogForAllowlist(toolSpecs) {
+    const allow = this._getToolAllowlist();
+    return (Array.isArray(toolSpecs) ? toolSpecs : [])
+      .map((t) => {
+        if (!t || typeof t !== 'object') return null;
+        const name = t.name ? String(t.name) : '';
+        if (!name) return null;
+        if (!allow.has(name)) return null;
+        return t;
+      })
+      .filter(Boolean);
+  }
+
+  async getAllowedToolCatalogForLlm(correlationId) {
+    // Cache for a short period to avoid hitting MCP /mcp/list on every voice command.
+    const ttlMs = Number(process.env.MCP_TOOL_CATALOG_TTL_MS || 5 * 60 * 1000);
+    const now = Date.now();
+    if (this._toolCatalogCache && (now - this._toolCatalogCacheAtMs) < ttlMs) {
+      return this._toolCatalogCache;
+    }
+
+    try {
+      const listResp = await this.listTools(correlationId);
+      const tools = this._extractToolsArrayFromListResponse(listResp);
+      const allowed = this._filterToolCatalogForAllowlist(tools);
+      const catalogForPrompt = { tools: allowed };
+
+      this._toolCatalogCache = catalogForPrompt;
+      this._toolCatalogCacheAtMs = now;
+      return catalogForPrompt;
+    } catch (err) {
+      logger.warn('Failed to fetch MCP tool catalog; continuing without it', {
+        correlationId,
+        error: String(err?.message || err),
+      });
+
+      // Keep existing cache (if any) even on failure.
+      return this._toolCatalogCache;
+    }
   }
 
   _asIntOrNull(v) {
@@ -31,14 +93,23 @@ class MCPClient {
         ? details.candidates
         : [];
 
-    const candidates = rawCandidates
+    let candidates = rawCandidates
       .map((c) => {
         if (!c || typeof c !== 'object') return null;
-        const name = c.name || c.room_name || c.device_name;
+        const roomName = c.room_name || c.roomName || null;
+        const deviceName = c.device_name || c.deviceName || null;
+        const rawName = c.name || c.title || c.label || null;
+
+        // For device ambiguity, c4-mcp often includes both `name` and `device_name`.
+        // Prefer `device_name` so the follow-up call can resolve by name reliably.
+        const name = deviceName || rawName || roomName;
+
         return {
           name: name ? String(name) : null,
+          label: null,
           room_id: c.room_id !== undefined ? this._asIntOrNull(c.room_id) : null,
-          room_name: c.room_name ? String(c.room_name) : null,
+          room_name: roomName ? String(roomName) : null,
+          device_name: deviceName ? String(deviceName) : null,
           device_id: c.device_id ? String(c.device_id) : null,
           score: c.score !== undefined ? this._asIntOrNull(c.score) : null,
         };
@@ -76,6 +147,39 @@ class MCPClient {
             || (args && typeof args.device_name === 'string' ? args.device_name : null)
           )
           : null;
+
+    if (kind === 'device') {
+      // Make device choices readable in the UI without breaking follow-up resolution.
+      // Frontend should display `label` when present, while `name` remains the actual device name.
+      candidates = candidates.map((c) => {
+        const room = c && c.room_name ? String(c.room_name) : '';
+        const nm = c && c.name ? String(c.name) : '';
+        const label = (room && nm) ? `${room} — ${nm}` : null;
+        return {
+          ...c,
+          label,
+        };
+      });
+
+      // Reduce noisy partial matches (common for media searches: "TV", "Plex", etc.).
+      // Keep this conservative: only filter when we have a query.
+      if (query && typeof query === 'string') {
+        const q = query.trim().toLowerCase();
+        const strong = candidates.filter((c) => {
+          const nameLower = (c && c.name ? String(c.name) : '').toLowerCase();
+          const deviceLower = (c && c.device_name ? String(c.device_name) : '').toLowerCase();
+          const score = (c && c.score !== null && c.score !== undefined) ? Number(c.score) : null;
+
+          // If score isn't available, don't filter it out.
+          if (!Number.isFinite(score)) return true;
+
+          return nameLower === q || deviceLower === q || score >= 80;
+        });
+        if (strong.length > 0) candidates = strong;
+      }
+
+      candidates = candidates.slice(0, 12);
+    }
 
     return {
       kind,
@@ -137,6 +241,16 @@ class MCPClient {
         args.source_device_name = String(choice.name);
       }
 
+      return { tool, args };
+    }
+
+    if (tool === 'c4_tv_watch') {
+      // c4-mcp contract: room_id is required; source_device_id is required.
+      // We expect the clarification choice to carry device_id and name.
+      if (choice.device_id) {
+        args.source_device_id = String(choice.device_id);
+      }
+      // Keep room_id as provided on the original intent.
       return { tool, args };
     }
 
@@ -242,6 +356,10 @@ class MCPClient {
       'c4_room_watch_status',
       'c4_room_listen_status',
       'c4_room_now_playing',
+      'c4_room_presence_report',
+      'c4_room_list_video_devices',
+      'c4_room_select_video_device',
+      'c4_room_select_audio_device',
       // Useful for debugging/ops; safe by default.
       'c4_memory_get',
       'c4_memory_clear',

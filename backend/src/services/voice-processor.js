@@ -26,7 +26,11 @@ async function processVoiceCommand(audioData, format, correlationId, sessionId) 
 
     // Step 2: Command Planning (LLM)
     logger.info('Step 2: Starting intent parsing', { correlationId });
-    const plan = await parseIntent(sttResult.transcript, correlationId);
+
+    // Provide the LLM with the real MCP tool catalog (filtered to allowed tools)
+    // so it can handle more natural language without a hard-coded tool list.
+    const toolCatalog = await mcpClient.getAllowedToolCatalogForLlm(correlationId);
+    const plan = await parseIntent(sttResult.transcript, correlationId, { toolCatalog });
 
     // Step 3: Execute tool call via c4-mcp (HTTP)
     logger.info('Step 3: Executing MCP command', { correlationId });

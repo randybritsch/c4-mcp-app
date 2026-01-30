@@ -1,7 +1,7 @@
 # Project Overview: C4-MCP-App
 
 **Version:** 1.0.0  
-**Last Updated:** January 26, 2026  
+**Last Updated:** January 29, 2026  
 **Status:** ✅ DEPLOYED - Running in Production
 
 ---
@@ -64,7 +64,7 @@ Reference deployment uses **Synology Container Manager (Docker Compose)** for re
 | Static Hosting (Optional) | Web Station / local server | LAN device | Hosts the frontend files (often run locally for mic permissions) |
 | Reverse Proxy | Synology DSM | DS218+ | HTTPS termination, routing, WebSocket support |
 | MCP Server | `c4-mcp` (HTTP) | Synology (container) | Control4 integration bridge |
-| Cloud LLM | OpenAI (tested with `gpt-4o-mini`) | Cloud | Natural language understanding |
+| Cloud LLM | Gemini (current; locked system prompt) / OpenAI (optional) | Cloud | Natural language understanding |
 | Cloud STT | Google/Azure/etc | Cloud | Speech-to-text conversion |
 
 ### 2.3 Data Flow
@@ -78,6 +78,10 @@ Reference deployment uses **Synology Container Manager (Docker Compose)** for re
   - Tool call executed via `c4-mcp`
    - Response streamed back via WebSocket to PWA
 
+  Notes:
+  - Backend may run deterministic preflight resolution (inventory lookup) to inject stable IDs (e.g., `room_id`) when there is exactly one match; otherwise it requests clarification.
+  - Locked system prompt integrity is enforced at backend startup (SHA-256 check) to prevent accidental prompt drift.
+
 2. **Text Input Flow:**
    - User types in PWA chat interface
   - Text sent via HTTPS POST to `POST /api/v1/voice/process-text`
@@ -87,7 +91,7 @@ Reference deployment uses **Synology Container Manager (Docker Compose)** for re
 ### 2.4 External Dependencies
 
 - **Cloud STT Provider** (Google Speech-to-Text, Azure Speech, or AWS Transcribe)
-- **Cloud LLM Provider** (OpenAI; tested with `gpt-4o-mini`)
+- **Cloud LLM Provider** (Gemini current; prompt-locked; provider-swappable)
 - **MCP Server** (`c4-mcp` HTTP server)
 - **Let's Encrypt** (SSL certificates via Synology DSM)
 - **Public DNS** (for HTTPS access)

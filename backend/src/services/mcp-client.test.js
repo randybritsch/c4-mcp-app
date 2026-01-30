@@ -160,3 +160,55 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
     });
   });
 });
+
+describe('MCPClient._extractAmbiguity', () => {
+  test('prefers device_name, adds room-aware label, and filters low-score noise for device ambiguity', () => {
+    const toolResp = {
+      result: {
+        ok: false,
+        error: 'Ambiguous',
+        details: {
+          error: 'ambiguous',
+          matches: [
+            {
+              name: 'TV',
+              device_name: 'Apple TV',
+              room_name: 'Family Room',
+              room_id: 6,
+              device_id: '2119',
+              score: 100,
+            },
+            {
+              name: 'Plex',
+              device_name: 'Plex',
+              room_name: 'TV Room',
+              room_id: 8,
+              device_id: '1888',
+              score: 35,
+            },
+          ],
+        },
+      },
+    };
+
+    const clarification = mcpClient._extractAmbiguity(
+      'c4_tv_watch_by_name',
+      { source_device_name: 'Apple TV' },
+      toolResp,
+    );
+
+    expect(clarification.kind).toBe('device');
+    expect(clarification.query).toBe('Apple TV');
+    expect(clarification.candidates).toEqual([
+      {
+        name: 'Apple TV',
+        label: 'Family Room — Apple TV',
+        room_id: 6,
+        room_name: 'Family Room',
+        device_name: 'Apple TV',
+        device_id: '2119',
+        score: 100,
+      },
+    ]);
+  });
+});

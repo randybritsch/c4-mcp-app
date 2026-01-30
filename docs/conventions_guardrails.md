@@ -4,6 +4,19 @@
 
 ---
 
+## Non-negotiable rules (do not violate)
+
+1) **c4-mcp must stay decoupled from c4-mcp-app.**
+	- The boundary is HTTP (and optionally STDIO) only.
+	- No shared code, no import coupling, no “reach into the other repo”, no hidden assumptions.
+	- Changes to either repo must not require synchronized releases beyond the published tool contracts.
+
+2) **The AI (Gemini) decides how to interpret user commands, then uses c4-mcp tools to carry them out.**
+	- Decision-making (intent → tool selection → args) lives in the app/backend layer.
+	- c4-mcp is an execution surface: validate inputs, enforce guardrails, execute tool calls, return structured results.
+
+---
+
 ## Language & Frameworks
 - **Node.js:** v22 (production), write code compatible with Node.js 18+
 - **Dependencies:** Pure JavaScript only—NO native addons (no `bcrypt`, `sqlite3`, `sharp`, `node-sass`)

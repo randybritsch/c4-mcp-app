@@ -1,38 +1,37 @@
 # Context Pack — c4-mcp-app (C4 Voice Control)
 
-**Last Updated:** January 26, 2026
+**Last Updated:** January 29, 2026
 
-**Deployment (current / may change):** NAS static IP `192.168.1.237`
+**Deployment (current / may change):** Synology NAS `192.168.1.237`
 
-- Backend REST base URL: `http://192.168.1.237:3002`
-- Backend WebSocket URL: `ws://192.168.1.237:3002/ws?token=<jwt>`
+- PWA UI (nginx/Web Station / reverse proxy): `https://192.168.1.237`
+- Backend REST base URL (direct): `http://192.168.1.237:3002`
+- Backend health: `GET http://192.168.1.237:3002/api/v1/health`
+- Backend MCP health: `GET http://192.168.1.237:3002/api/v1/health/mcp`
+- Backend WebSocket: `ws://192.168.1.237:3002/ws?token=<jwt>` (or `wss://192.168.1.237/ws?token=<jwt>` if proxy routes `/ws`)
 - c4-mcp HTTP base URL (host port mapping): `http://192.168.1.237:3334`
-- Local UI (served on your machine) pointing at NAS backend: `http://localhost:5173/?backend=http://192.168.1.237:3002`
 
 ## Mini executive summary (≤120 words)
 
-c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A PWA frontend captures mic audio (MediaRecorder, with a WAV fallback for iOS/Safari) or sends text to a Node.js backend (Express + WebSocket). The backend uses cloud STT to produce a transcript, then uses an LLM to produce a deterministic tool plan (`{ tool, args }`), and finally executes that plan by calling the separate `c4-mcp` HTTP server (`/mcp/call`). The repos remain fully decoupled: integration happens only over `C4_MCP_BASE_URL`. Conversational memory intentionally lives in `c4-mcp`; this app passes a stable per-device session identifier (deviceId) to `c4-mcp` via `X-Session-Id` so follow-ups for lights and TV/media can use `*_last` tools. Backend timeouts + a frontend watchdog prevent indefinite “executing…” hangs.
+c4-mcp-app is a lightweight voice + text UI for controlling Control4. A PWA frontend (served over HTTPS on the NAS) captures mic audio (MediaRecorder, with a WAV fallback for iOS/Safari) or sends text to a Node.js backend (Express + WebSocket). The backend uses cloud STT to produce a transcript, then uses an LLM (Gemini current) to produce a deterministic tool plan (`{ tool, args }`), and executes that plan by calling the separate `c4-mcp` HTTP server (`/mcp/call`). The repos remain decoupled: integration happens only over `C4_MCP_BASE_URL`. Conversational memory lives in `c4-mcp`; the app passes a stable per-device session id (deviceId) via `X-Session-Id` so follow-ups can use `*_last` tools. The backend enforces timeouts and the UI watchdog prevents “stuck executing…”.
 
 ## Critical architecture bullets (≤6)
 
-- Voice path: PWA mic (MediaRecorder or WAV fallback) → WS audio → backend STT → backend LLM plan → `c4-mcp` tool call → WS progress/results.
-- Text path: PWA chat → `POST /api/v1/voice/process-text` → LLM plan → `c4-mcp` tool call.
-- Decoupled boundary: only HTTP calls to `c4-mcp` (no shared code; configured via `C4_MCP_BASE_URL`).
-- Session context: backend sends `X-Session-Id: <deviceId>` to `c4-mcp` for follow-ups.
-- Ambiguity UX: backend emits `clarification-required`, UI replies `clarification-choice`, backend retries with scoped args.
-- Clarification retry rule: prefer stable identifiers (e.g., `room_id`) when available; avoid re-sending ambiguous `room_name`.
-- Anti-hang: backend enforces `C4_MCP_TIMEOUT_MS` and UI has a watchdog for stuck “executing”.
-- Refactor direction: move toward a more “typical MCP” app layout (clearer domain modules + strict contracts) without breaking REST/WS payloads.
+- Voice: PWA mic → WS audio → backend STT → backend LLM plan → `c4-mcp` tool call → WS results.
+- Text: PWA chat → `POST /api/v1/voice/process-text` → LLM plan → `c4-mcp` tool call.
+- Boundary: only HTTP calls to `c4-mcp` (no shared code; configured via `C4_MCP_BASE_URL`).
+- Session: backend sends `X-Session-Id: <deviceId>` to `c4-mcp` for follow-ups.
+- Ambiguity: backend emits `clarification-required`; UI replies `clarification-choice`; retry must use stable IDs; auto-resolve only on proven single match.
+- Anti-hang: enforce `C4_MCP_TIMEOUT_MS` and a UI watchdog; startup enforces locked prompt integrity (SHA-256).
 
 ## Current working set (3–7 files/modules)
 
 - `backend/src/services/mcp-client.js` — `c4-mcp` HTTP client (payload shape, timeouts, ambiguity handling, `X-Session-Id`).
-- `backend/src/websocket.js` — WS server wiring + heartbeat; delegates to the WS service modules below.
-- `backend/src/services/ws-connection.js` — WS connection/auth + per-connection event wiring.
-- `backend/src/services/ws-router.js` — parses/routs inbound WS messages (`audio-*`, `clarification-choice`, `ping`).
-- `backend/src/services/ws-audio-pipeline.js` — audio-end pipeline (STT → LLM plan → MCP execute; shares execution via `backend/src/services/command-orchestrator.js`).
-- `backend/src/services/ws-clarification.js` — clarification retry handler (stores selection + retries with refined args).
+- `backend/src/services/ws-audio-pipeline.js` — STT → LLM plan → MCP execute (+ deterministic single-match preflight).
+- `backend/src/services/ws-clarification.js` — clarification storage + retry with refined args.
+- `backend/src/websocket.js` — WS server wiring + heartbeat.
 - `frontend/js/app.js` — UI state machine + watchdog + clarification picker.
+- `nas/c4-mcp/overrides/app.py` — production hotfix layer for MCP tool compatibility (mounted into the c4-mcp container).
 
 ## Interfaces/contracts that must not break
 
@@ -46,7 +45,7 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 
 **WebSocket protocol (UI ↔ backend)**
 
-- Connect: `ws://192.168.1.237:3002/ws?token=<jwt>` (or via reverse proxy WSS)
+- Connect: `/ws?token=<jwt>` (WS direct or WSS via reverse proxy)
 - Client → server: `audio-start`, `audio-chunk`, `audio-end`, `clarification-choice`, `ping`
 - Server → client: `connected`, `processing`, `transcript`, `intent`, `clarification-required`, `command-complete`, `error`, `pong`
 
@@ -56,12 +55,18 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 - Call tool: `POST <C4_MCP_BASE_URL>/mcp/call` body `{ "kind": "tool", "name": "<tool>", "args": { ... } }`
 - Session header: `X-Session-Id: <deviceId>` (required for follow-ups via `c4_lights_set_last`, `c4_tv_off_last`, `c4_tv_remote_last`)
 
+**Clarification + follow-up correctness**
+
+- When a user picks a clarification candidate, the retry must use stable IDs (typically `room_id`, `device_id`) and remain schema-valid.
+- Follow-ups like “turn it off” must not crash MCP due to argument drift.
+
 ## Today’s objectives and acceptance criteria
 
 **Objective A — Confirm the deployment is running the latest code**
 
 - `GET /api/v1/health/mcp` reports the expected `C4_MCP_BASE_URL` and a non-zero tool count.
 - WS `/ws` connects and emits `connected` promptly.
+Acceptance: UI loads over HTTPS and microphone permissions work.
 
 **Objective B — Eliminate “stuck executing…”**
 
@@ -73,33 +78,22 @@ c4-mcp-app is a lightweight voice + text UI for controlling a Control4 home. A P
 - “Turn off <room> lights” then “turn it back on” succeeds in the same browser session.
 - “Turn off the TV” then “mute it” succeeds in the same browser session.
 - Follow-up resolution uses `X-Session-Id` + `*_last` tools (no state duplication in this repo).
-
-**Objective D — Prepare the “typical MCP” refactor safely (no contract breaks)**
-
-- Identify/lock the external contracts (REST + WS event names + backend→`c4-mcp` payload shape).
-- Acceptance: existing flows (voice, text, clarification) behave identically; Jest + ESLint stay green.
-- Start from current known-good HEAD; only rewind to an older commit if you have a specific regression you’re escaping.
-- Before refactor code changes: create a baseline tag/branch (e.g., `refactor-baseline-2026-01-26`) for quick rollback and diffing.
-- Refactor in small, testable slices; re-run Jest + ESLint after each slice.
+Acceptance (TV follow-up): “Watch Roku Basement” (clarify if needed) then “turn it off” succeeds with no MCP 500.
 
 ## Guardrails block (from conventions)
 
-- Node.js: compatible with Node 18+; avoid native addons.
-- Keep repos decoupled: never add shared code that couples `c4-mcp-app` to `c4-mcp` internals.
-- Do not re-implement memory here; always rely on `c4-mcp` session memory via `X-Session-Id`.
-- Do not break REST/WS/MCP payload shapes; changes must be additive and backwards-compatible.
-- Refactor direction: restructure internals (module boundaries, file sizes, clearer orchestration) but keep the wire contracts stable.
-- Keep all tool executions bounded: enforce `C4_MCP_TIMEOUT_MS`; never allow indefinite hangs.
-- No secrets in git; only `.env`/deployment secrets stores.
-- Keep tests/lint green (Jest + ESLint) for any backend changes.
+- Node.js: Node 18+; avoid native addons.
+- Keep repos decoupled; do not depend on `c4-mcp` internals.
+- Do not implement memory here; rely on `c4-mcp` via `X-Session-Id`.
+- Keep REST/WS/MCP payloads stable (additive only) and time-bounded (`C4_MCP_TIMEOUT_MS`).
+- Prefer fixing schema drift at the MCP boundary (compat shims) vs backend heuristics.
+- No secrets in git; keep Jest/ESLint green.
 
 ## Links/paths for deeper docs
 
 - `docs/project_overview.md`
 - `docs/bootstrap_summary.md`
 - `docs/architecture.md`
-- `docs/api/endpoints.md`
-- `docs/ops/runbook.md`
 - `backend/README.md`
 
 ## Next Prompt to Paste
@@ -113,7 +107,8 @@ Steps:
 1) Health: GET /api/v1/health and GET /api/v1/health/mcp (confirm C4_MCP_BASE_URL and toolCount).
 2) WS: connect to /ws?token=... and confirm you receive connected then ping/pong works.
 3) Text flow: send "turn off basement lights" then "turn it back on" and confirm the second command uses session context (X-Session-Id) and completes.
-4) If anything hangs: capture backend logs by correlationId and confirm whether the MCP call timed out (C4_MCP_TIMEOUT_MS) or returned an error.
+4) TV flow: say "Watch Roku" → pick Roku Basement → then say "turn it off" and confirm no MCP 500.
+5) If anything hangs/fails: capture backend logs by correlationId and confirm whether the MCP call timed out (C4_MCP_TIMEOUT_MS) or returned an error.
 
 Constraints: keep contracts stable; keep repos decoupled; do not implement memory here; all operations must be time-bounded; keep changes minimal and test after edits.
 ```

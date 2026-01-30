@@ -68,10 +68,10 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/config.js?v=20260123-2"></script>
-  <script src="js/websocket.js?v=20260123-2"></script>
-  <script src="js/voice.js?v=20260123-2"></script>
-  <script src="js/app.js?v=20260126-1"></script>
+  <script src="js/config.js?v=20260129-1"></script>
+  <script src="js/websocket.js?v=20260129-1"></script>
+  <script src="js/voice.js?v=20260129-1"></script>
+  <script src="js/app.js?v=20260129-1"></script>
   
   <!-- Service Worker Registration -->
   <script>
@@ -91,8 +91,32 @@
         navigator.serviceWorker.register('service-worker.js')
           .then((reg) => {
             console.log('Service Worker registered:', reg.scope);
+
+            const trySkipWaiting = () => {
+              // If there's an updated SW waiting, activate it immediately.
+              if (reg.waiting) {
+                try { reg.waiting.postMessage({ type: 'SKIP_WAITING' }); } catch { /* ignore */ }
+              }
+            };
+
             // Prompt the browser to check for an updated SW.
             try { reg.update(); } catch { /* ignore */ }
+            trySkipWaiting();
+
+            reg.addEventListener('updatefound', () => {
+              const sw = reg.installing;
+              if (!sw) return;
+              sw.addEventListener('statechange', () => {
+                if (sw.state === 'installed') {
+                  trySkipWaiting();
+                }
+              });
+            });
+
+            // When the new SW takes control, reload so we use the fresh cached shell.
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              try { window.location.reload(); } catch { /* ignore */ }
+            });
           })
           .catch(err => console.error('Service Worker registration failed:', err));
       });

@@ -17,6 +17,20 @@ class App {
       currentRoomBanner: document.getElementById('currentRoomBanner'),
     };
 
+    // Self-heal: if an older cached HTML is missing the banner element,
+    // create it so room context can still display.
+    if (!this.elements.currentRoomBanner) {
+      const header = document.querySelector('header');
+      if (header) {
+        const banner = document.createElement('div');
+        banner.className = 'room-banner';
+        banner.id = 'currentRoomBanner';
+        banner.style.display = 'none';
+        header.appendChild(banner);
+        this.elements.currentRoomBanner = banner;
+      }
+    }
+
     this.commandHistory = [];
     this.isRecording = false;
 
@@ -157,6 +171,7 @@ class App {
       await wsClient.connect();
       this.updateStatus('online', 'Connected');
       this.elements.recordBtn.disabled = false;
+      this.clearStatusMessage();
     } catch (error) {
       console.error('Failed to connect:', error);
       const details = [
@@ -180,6 +195,7 @@ class App {
     wsClient.on('connected', () => {
       this.updateStatus('online', 'Connected');
       this.elements.recordBtn.disabled = false;
+      this.clearStatusMessage();
     });
 
     wsClient.on('disconnected', () => {
@@ -195,6 +211,7 @@ class App {
 
     wsClient.on('audio-ready', () => {
       console.log('Server ready to receive audio');
+      this.clearStatusMessage();
     });
 
     wsClient.on('processing', (message) => {
@@ -214,6 +231,7 @@ class App {
 
     wsClient.on('room-context', (message) => {
       const room = this._extractRoomFromMessage(message);
+      console.log('room-context', room || message);
       if (room) this.setCurrentRoom(room);
     });
 
@@ -299,6 +317,11 @@ class App {
   updateStatusMessage(message) {
     this.elements.statusMessage.textContent = message;
     this.elements.statusMessage.className = 'status-message processing';
+  }
+
+  clearStatusMessage() {
+    this.elements.statusMessage.textContent = '';
+    this.elements.statusMessage.className = 'status-message';
   }
 
   /**
@@ -402,7 +425,7 @@ class App {
       const btn = document.createElement('button');
       btn.className = 'clarification-choice-btn';
       btn.type = 'button';
-      btn.textContent = c.name;
+      btn.textContent = c.label || c.name;
       btn.addEventListener('click', () => {
         // Disable all buttons while executing.
         Array.from(this.elements.clarificationChoices.querySelectorAll('button')).forEach((b) => (b.disabled = true));

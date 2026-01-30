@@ -3,6 +3,21 @@ const app = require('./app');
 const config = require('./config');
 const logger = require('./utils/logger');
 const { initWebSocketServer } = require('./websocket');
+const { assertLockedGeminiPromptIntegrity } = require('./utils/locked-gemini-prompt');
+
+// Hard fail on startup if the canonical Gemini prompt is missing/modified.
+// This prevents accidental edits from silently changing runtime behavior.
+try {
+  const info = assertLockedGeminiPromptIntegrity();
+  logger.info('Locked Gemini prompt verified', info);
+} catch (err) {
+  logger.error('Locked Gemini prompt verification failed; refusing to start', {
+    code: err?.code,
+    message: String(err?.message || err),
+    details: err?.details,
+  });
+  process.exit(1);
+}
 
 const server = http.createServer(app);
 

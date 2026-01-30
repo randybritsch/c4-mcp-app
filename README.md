@@ -2,6 +2,15 @@
 
 Voice-controlled smart home interface for Control4 automation via a Progressive Web App (PWA) + Node.js backend, typically deployed on a Synology NAS and calling the `c4-mcp` HTTP server.
 
+## Non-negotiable rules
+
+1) **`c4-mcp` must always be decoupled from `c4-mcp-app`.**
+  - The boundary is HTTP only (`C4_MCP_BASE_URL`), with no shared code.
+
+2) **Gemini (the AI) makes the decisions; `c4-mcp` executes.**
+  - The backend interprets user commands (intent → tool selection → args) using Gemini.
+  - The backend then calls `c4-mcp` tools to carry out the plan.
+
 ## Project Structure
 
 ```
