@@ -1,5 +1,11 @@
 require('dotenv').config();
 
+function isPlaceholderValue(v) {
+  const s = String(v || '').trim();
+  if (!s) return true;
+  return /^(your-|change-?me|example|placeholder)/i.test(s);
+}
+
 const config = {
   // Server
   env: process.env.NODE_ENV || 'development',
@@ -15,7 +21,30 @@ const config = {
 
   // Speech-to-Text
   stt: {
-    provider: process.env.STT_PROVIDER || 'google',
+    // Prefer local Whisper by default so the app can run without cloud API keys.
+    // If STT_PROVIDER is explicitly set to google/azure, we honor it *unless*
+    // its credentials are missing or clearly placeholder.
+    provider: (() => {
+      const raw = String(process.env.STT_PROVIDER || '').trim().toLowerCase();
+      if (!raw) return 'whisper';
+
+      if (raw === 'google') {
+        const key = process.env.GOOGLE_STT_API_KEY;
+        if (isPlaceholderValue(key) || String(key).trim() === 'your-google-api-key') {
+          return 'whisper';
+        }
+      }
+
+      if (raw === 'azure') {
+        const key = process.env.AZURE_STT_KEY;
+        const region = process.env.AZURE_STT_REGION;
+        if (isPlaceholderValue(key) || isPlaceholderValue(region)) {
+          return 'whisper';
+        }
+      }
+
+      return raw;
+    })(),
     timeoutMs: parseInt(process.env.STT_TIMEOUT_MS, 10) || 15000,
     google: {
       apiKey: process.env.GOOGLE_STT_API_KEY,
@@ -27,10 +56,12 @@ const config = {
       baseUrl:
         (process.env.WHISPER_BASE_URL
           || process.env.STT_WHISPER_BASE_URL
-          || 'http://whisper:9000')
+          || 'http://whisper:8000')
           .replace(/\/+$/, ''),
       apiKey: process.env.WHISPER_API_KEY || process.env.STT_WHISPER_API_KEY,
-      model: process.env.WHISPER_MODEL || 'base.en',
+      // Speaches ships/installs models by repository id (e.g. Systran/*).
+      // Default to an installed, CPU-friendly English ASR model.
+      model: process.env.WHISPER_MODEL || 'Systran/faster-distil-whisper-small.en',
       language: process.env.WHISPER_LANGUAGE || 'en',
     },
     azure: {

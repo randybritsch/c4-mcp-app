@@ -9,6 +9,98 @@ class MCPClient {
     this._toolCatalogCacheAtMs = 0;
   }
 
+  _normalizeArgsForTool(toolName, rawArgs) {
+    const args = (rawArgs && typeof rawArgs === 'object') ? { ...rawArgs } : {};
+
+    // Normalize common room key variants (Gemini sometimes emits `room` instead of `room_name`).
+    const roomValue = (typeof args.room_name === 'string' ? args.room_name : null)
+      || (typeof args.roomName === 'string' ? args.roomName : null)
+      || (typeof args.room === 'string' ? args.room : null);
+    if (roomValue && (!args.room_name || typeof args.room_name !== 'string')) {
+      args.room_name = String(roomValue);
+    }
+    delete args.room;
+    delete args.roomName;
+
+    // Internal planner flags that only some tools support.
+    // When passed to tools that don't accept them, c4-mcp may 500 on schema validation.
+    const toolsAllowingPlannerFlags = new Set([
+      'c4_tv_watch_by_name',
+      'c4_room_listen_by_name',
+      'c4_room_lights_set',
+      'c4_light_set_by_name',
+      'c4_scene_activate_by_name',
+      'c4_scene_set_state_by_name',
+      'c4_media_watch_launch_app_by_name',
+      'c4_media_watch_launch_app',
+    ]);
+
+    if (!toolsAllowingPlannerFlags.has(toolName)) {
+      delete args.include_candidates;
+      delete args.require_unique;
+    }
+
+    // Compatibility shims for LLM/planner outputs.
+    // c4-mcp tool schemas are strict; passing unexpected args can 500.
+    if (toolName === 'c4_tv_watch_by_name' || toolName === 'c4_room_listen_by_name') {
+      const source = (typeof args.source_device_name === 'string' ? args.source_device_name : null)
+        || (typeof args.sourceDeviceName === 'string' ? args.sourceDeviceName : null);
+      const video = (typeof args.video_device_name === 'string' ? args.video_device_name : null)
+        || (typeof args.videoDeviceName === 'string' ? args.videoDeviceName : null);
+      const device = (typeof args.device_name === 'string' ? args.device_name : null)
+        || (typeof args.deviceName === 'string' ? args.deviceName : null);
+
+      const pick = (v) => (v && String(v).trim() ? String(v).trim() : null);
+      const chosen = pick(source) || pick(video) || pick(device);
+      if (chosen) {
+        args.source_device_name = chosen;
+      }
+
+      // These tools do not accept device_name/video_device_name; keep only source_device_name.
+      delete args.device_name;
+      delete args.deviceName;
+      delete args.video_device_name;
+      delete args.videoDeviceName;
+      delete args.sourceDeviceName;
+    }
+
+    // Some callers/LLMs add `include_candidates` to c4_room_presence_report; c4-mcp doesn't accept it.
+    if (toolName === 'c4_room_presence_report') {
+      delete args.include_candidates;
+      delete args.require_unique;
+    }
+
+    // App launch tools are strict: normalize common key variants.
+    if (toolName === 'c4_media_watch_launch_app_by_name' || toolName === 'c4_media_watch_launch_app') {
+      const app = (typeof args.app === 'string' ? args.app : null)
+        || (typeof args.app_name === 'string' ? args.app_name : null)
+        || (typeof args.appName === 'string' ? args.appName : null)
+        || (typeof args.application === 'string' ? args.application : null);
+      if (app && (!args.app || typeof args.app !== 'string')) {
+        args.app = String(app);
+      }
+      delete args.app_name;
+      delete args.appName;
+      delete args.application;
+
+      // Gemini sometimes uses `source_device_name` for these tools; by-name variant expects `device_name`.
+      if (toolName === 'c4_media_watch_launch_app_by_name') {
+        const device = (typeof args.device_name === 'string' ? args.device_name : null)
+          || (typeof args.deviceName === 'string' ? args.deviceName : null)
+          || (typeof args.source_device_name === 'string' ? args.source_device_name : null)
+          || (typeof args.sourceDeviceName === 'string' ? args.sourceDeviceName : null);
+        if (device && (!args.device_name || typeof args.device_name !== 'string')) {
+          args.device_name = String(device);
+        }
+        delete args.deviceName;
+        delete args.source_device_name;
+        delete args.sourceDeviceName;
+      }
+    }
+
+    return args;
+  }
+
   getToolAllowlist() {
     return Array.from(this._getToolAllowlist());
   }
@@ -76,22 +168,33 @@ class MCPClient {
   }
 
   _extractAmbiguity(toolName, args, toolResp) {
-    // c4-mcp returns: { ok: true, result: { ok: false, error: '...', details: { error: 'ambiguous', matches/candidates: [...] } } }
+    // c4-mcp returns tool results in a couple of common shapes:
+    // - { result: { ok:false, error:'ambiguous', details:{ error:'ambiguous', matches/candidates:[...] } } }
+    // - { result: { ok:false, error:'ambiguous', matches/candidates:[...], details:'Multiple rooms could match ...' } }
     const inner = toolResp && typeof toolResp === 'object' ? toolResp.result : null;
-    const details = inner && typeof inner === 'object' ? inner.details : null;
+    if (!inner || typeof inner !== 'object') return null;
 
-    const isAmbiguous = details
-      && typeof details === 'object'
-      && String(details.error || '').toLowerCase() === 'ambiguous'
-      && (Array.isArray(details.matches) || Array.isArray(details.candidates));
+    const innerDetailsObj = (inner.details && typeof inner.details === 'object') ? inner.details : null;
+    const payload = innerDetailsObj || inner;
 
-    if (!isAmbiguous) return null;
+    // Ambiguity payloads vary slightly by tool:
+    // - Some return: inner.error === 'ambiguous' with candidates in inner.matches
+    // - Others return: inner.details.error === 'ambiguous' with candidates in inner.details.matches
+    const ambiguousCode = String(
+      (innerDetailsObj && typeof innerDetailsObj === 'object' ? innerDetailsObj.error : null)
+      || (inner && typeof inner === 'object' ? inner.error : null)
+      || (payload && typeof payload === 'object' ? payload.error : null)
+      || '',
+    ).toLowerCase();
 
-    const rawCandidates = Array.isArray(details.matches)
-      ? details.matches
-      : Array.isArray(details.candidates)
-        ? details.candidates
+    const rawCandidates = Array.isArray(payload.matches)
+      ? payload.matches
+      : Array.isArray(payload.candidates)
+        ? payload.candidates
         : [];
+
+    const isAmbiguous = ambiguousCode === 'ambiguous' && rawCandidates.length > 0;
+    if (!isAmbiguous) return null;
 
     let candidates = rawCandidates
       .map((c) => {
@@ -181,10 +284,18 @@ class MCPClient {
       candidates = candidates.slice(0, 12);
     }
 
+    const message = (() => {
+      if (innerDetailsObj && typeof innerDetailsObj === 'object' && innerDetailsObj.details) return innerDetailsObj.details;
+      if (typeof inner.details === 'string' && inner.details.trim()) return inner.details.trim();
+      const innerErr = inner && typeof inner === 'object' ? String(inner.error || '') : '';
+      if (innerErr.toLowerCase() === 'ambiguous') return 'Multiple matches found';
+      return innerErr || 'Multiple matches found';
+    })();
+
     return {
       kind,
       query,
-      message: details.details || inner.error || 'Multiple matches found',
+      message,
       candidates,
     };
   }
@@ -198,7 +309,21 @@ class MCPClient {
 
     // Make the follow-up call strict.
     args.require_unique = true;
-    args.include_candidates = false;
+    args.include_candidates = true;
+
+    if (tool === 'c4_room_presence_report') {
+      // Presence is a read/resolve tool; disambiguate by supplying a deterministic room identifier.
+      // Prefer room_id when available.
+      if (choice.room_id !== null && choice.room_id !== undefined) {
+        args.room_id = this._asIntOrNull(choice.room_id);
+        // Keep room_name only for display/debug when available.
+        if (choice.name) args.room_name = String(choice.name);
+      } else if (choice.name) {
+        args.room_name = String(choice.name);
+        delete args.room_id;
+      }
+      return { tool, args };
+    }
 
     if (tool === 'c4_room_lights_set') {
       // c4-mcp contract: provide exactly one of room_id OR room_name.
@@ -341,6 +466,9 @@ class MCPClient {
       'c4_tv_off_last',
       'c4_tv_remote',
       'c4_tv_remote_last',
+      'c4_media_remote',
+      'c4_media_remote_last',
+      'c4_media_watch_launch_app',
       'c4_media_watch_launch_app_by_name',
       'c4_scene_activate_by_name',
       'c4_scene_set_state_by_name',
@@ -502,7 +630,7 @@ class MCPClient {
     // Preferred shape: { tool: "c4_room_lights_set", args: {...} }
     if (intent.tool && intent.args) {
       const toolName = String(intent.tool);
-      const { args } = intent;
+      const args = this._normalizeArgsForTool(toolName, intent.args);
 
       logger.info('Sending MCP tool call', {
         correlationId,

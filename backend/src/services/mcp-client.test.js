@@ -22,7 +22,7 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
       args: {
         state: 'off',
         require_unique: true,
-        include_candidates: false,
+        include_candidates: true,
         room_id: 455,
       },
     });
@@ -49,7 +49,7 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
       args: {
         state: 'on',
         require_unique: true,
-        include_candidates: false,
+        include_candidates: true,
         room_name: 'Basement Stairs',
       },
     });
@@ -74,7 +74,7 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
       args: {
         scene_name: 'Movie Time',
         require_unique: true,
-        include_candidates: false,
+        include_candidates: true,
       },
     });
   });
@@ -100,7 +100,7 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
         state: 'on',
         scene_name: 'Romantic',
         require_unique: true,
-        include_candidates: false,
+        include_candidates: true,
       },
     });
   });
@@ -126,7 +126,7 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
       args: {
         source_device_name: 'Spotify',
         require_unique: true,
-        include_candidates: false,
+        include_candidates: true,
         room_id: 101,
         room_name: 'Family Room',
       },
@@ -155,9 +155,65 @@ describe('MCPClient.buildRefinedIntentFromChoice', () => {
         room_name: 'Family Room',
         source_device_name: 'Pandora',
         require_unique: true,
-        include_candidates: false,
+        include_candidates: true,
       },
     });
+  });
+
+  test('c4_room_presence_report prefers room_id for room candidate', () => {
+    const refined = mcpClient.buildRefinedIntentFromChoice(
+      { tool: 'c4_room_presence_report', args: { room_name: 'Basement' } },
+      { name: 'Basement Stairs', room_id: 455 },
+    );
+
+    expect(refined).toEqual({
+      tool: 'c4_room_presence_report',
+      args: {
+        room_name: 'Basement Stairs',
+        room_id: 455,
+        require_unique: true,
+        include_candidates: true,
+      },
+    });
+  });
+});
+
+describe('MCPClient.sendCommand arg normalization', () => {
+  test('normalizes c4_tv_watch_by_name room -> room_name and device_name -> source_device_name', async () => {
+    const client = new mcpClient.constructor();
+    // Bypass allowlist + HTTP call and just inspect what sendCommand would pass into callTool.
+    client._assertToolAllowed = () => {};
+    client.callTool = jest.fn().mockResolvedValue({ result: { ok: true } });
+
+    await client.sendCommand({
+      tool: 'c4_tv_watch_by_name',
+      args: { room: 'Basement', device_name: 'Roku' },
+    }, 'corr-1', 'sess-1');
+
+    expect(client.callTool).toHaveBeenCalledWith(
+      'c4_tv_watch_by_name',
+      { room_name: 'Basement', source_device_name: 'Roku' },
+      'corr-1',
+      'sess-1',
+    );
+  });
+
+  test('strips include_candidates for c4_room_presence_report to avoid MCP schema 500', async () => {
+    const client = new mcpClient.constructor();
+    client._assertToolAllowed = () => {};
+    client.callTool = jest.fn().mockResolvedValue({ result: { ok: true } });
+
+    await client.sendCommand({
+      tool: 'c4_room_presence_report',
+      args: { room_name: 'Basement', include_candidates: true, require_unique: true },
+    }, 'corr-2', 'sess-2');
+
+    expect(client.callTool).toHaveBeenCalledWith(
+      'c4_room_presence_report',
+      { room_name: 'Basement' },
+      'corr-2',
+      'sess-2',
+    );
   });
 });
 
@@ -210,5 +266,131 @@ describe('MCPClient._extractAmbiguity', () => {
         score: 100,
       },
     ]);
+  });
+
+  test('extracts room ambiguity from c4_room_presence_report (inner.error=ambiguous)', () => {
+    const toolResp = {
+      result: {
+        ok: false,
+        error: 'ambiguous',
+        details: {
+          matches: [
+            { name: 'TV Room', room_id: 101, room_name: 'TV Room' },
+            { name: 'Basement Gym', room_id: 202, room_name: 'Basement Gym' },
+          ],
+        },
+      },
+    };
+
+    const clarification = mcpClient._extractAmbiguity(
+      'c4_room_presence_report',
+      { room_name: 'Basement' },
+      toolResp,
+    );
+
+    expect(clarification).toMatchObject({
+      kind: 'room',
+      query: 'Basement',
+    });
+    expect(Array.isArray(clarification.candidates)).toBe(true);
+    expect(clarification.candidates.map((c) => c.name)).toEqual(['TV Room', 'Basement Gym']);
+    expect(clarification.candidates[0]).toMatchObject({ room_id: 101, room_name: 'TV Room' });
+  });
+
+  test('extracts room ambiguity from c4_room_presence_report (matches on inner)', () => {
+    const toolResp = {
+      result: {
+        ok: false,
+        error: 'ambiguous',
+        details: "Multiple rooms could match 'Basement' (prefix match).",
+        candidates: [
+          { name: 'Basement Stairs', room_id: 455, score: 83 },
+          { name: 'Basement Bathroom', room_id: 402, score: 81 },
+        ],
+        matches: [
+          { name: 'Basement Stairs', room_id: 455, score: 83 },
+          { name: 'Basement Bathroom', room_id: 402, score: 81 },
+        ],
+      },
+    };
+
+    const clarification = mcpClient._extractAmbiguity(
+      'c4_room_presence_report',
+      { room_name: 'Basement' },
+      toolResp,
+    );
+
+    expect(clarification).toMatchObject({
+      kind: 'room',
+      query: 'Basement',
+    });
+    expect(clarification.message).toContain('Multiple rooms could match');
+    expect(clarification.candidates.map((c) => c.name)).toEqual(['Basement Stairs', 'Basement Bathroom']);
+  });
+});
+
+describe('MCPClient.sendCommand', () => {
+  test('normalizes c4_tv_watch_by_name device_name -> source_device_name and strips device_name', async () => {
+    const originalCallTool = mcpClient.callTool;
+    mcpClient.callTool = jest.fn().mockResolvedValue({ result: { ok: true } });
+
+    try {
+      const intent = {
+        tool: 'c4_tv_watch_by_name',
+        args: {
+          room_name: 'Basement',
+          device_name: 'Roku',
+        },
+      };
+
+      const resp = await mcpClient.sendCommand(intent, 'corr-1', 'sess-1');
+
+      expect(mcpClient.callTool).toHaveBeenCalledTimes(1);
+      expect(mcpClient.callTool).toHaveBeenCalledWith(
+        'c4_tv_watch_by_name',
+        {
+          room_name: 'Basement',
+          source_device_name: 'Roku',
+        },
+        'corr-1',
+        'sess-1',
+      );
+      expect(resp.success).toBe(true);
+      expect(resp.args).toEqual({ room_name: 'Basement', source_device_name: 'Roku' });
+    } finally {
+      mcpClient.callTool = originalCallTool;
+    }
+  });
+
+  test('normalizes c4_tv_watch_by_name video_device_name -> source_device_name and strips video_device_name', async () => {
+    const originalCallTool = mcpClient.callTool;
+    mcpClient.callTool = jest.fn().mockResolvedValue({ result: { ok: true } });
+
+    try {
+      const intent = {
+        tool: 'c4_tv_watch_by_name',
+        args: {
+          room_name: 'Basement',
+          video_device_name: 'Roku',
+        },
+      };
+
+      const resp = await mcpClient.sendCommand(intent, 'corr-2', 'sess-2');
+
+      expect(mcpClient.callTool).toHaveBeenCalledTimes(1);
+      expect(mcpClient.callTool).toHaveBeenCalledWith(
+        'c4_tv_watch_by_name',
+        {
+          room_name: 'Basement',
+          source_device_name: 'Roku',
+        },
+        'corr-2',
+        'sess-2',
+      );
+      expect(resp.success).toBe(true);
+      expect(resp.args).toEqual({ room_name: 'Basement', source_device_name: 'Roku' });
+    } finally {
+      mcpClient.callTool = originalCallTool;
+    }
   });
 });

@@ -47,17 +47,17 @@ ssh "${NAS_USER}@${NAS_HOST}" "cd $NAS_BACKEND_DIR && tar -xzf $tempArchive && r
 Remove-Item $tempArchive
 Write-Host "  ✓ Files deployed" -ForegroundColor Gray
 
-# Step 3: Remove node_modules and .env if they were copied
-Write-Host "[3/6] Cleaning up..." -ForegroundColor Green
-ssh "${NAS_USER}@${NAS_HOST}" "cd $NAS_BACKEND_DIR && rm -rf node_modules .env *.log"
+# Step 3: Remove node_modules and logs (do NOT delete .env)
+Write-Host "[3/6] Cleaning up (preserving .env)..." -ForegroundColor Green
+ssh "${NAS_USER}@${NAS_HOST}" "cd $NAS_BACKEND_DIR && rm -rf node_modules *.log"
 
 # Step 4: Install dependencies
 Write-Host "[4/6] Installing Node.js dependencies (this may take 2-3 minutes)..." -ForegroundColor Green
 ssh "${NAS_USER}@${NAS_HOST}" "cd $NAS_BACKEND_DIR && $NODE_PATH $NPM_PATH install --production"
 
-# Step 5: Setup .env
-Write-Host "[5/6] Creating .env template..." -ForegroundColor Green
-ssh "${NAS_USER}@${NAS_HOST}" "cd $NAS_BACKEND_DIR && cp .env.example .env && chmod 600 .env"
+# Step 5: Setup .env (only if missing)
+Write-Host "[5/6] Ensuring .env exists (will not overwrite)..." -ForegroundColor Green
+ssh "${NAS_USER}@${NAS_HOST}" "cd $NAS_BACKEND_DIR && if [ -f .env ]; then echo '  ✓ .env exists; leaving as-is'; else cp .env.example .env && chmod 600 .env && echo '  ✓ Created .env from .env.example'; fi"
 
 # Step 6: Test Node.js
 Write-Host "[6/6] Verifying installation..." -ForegroundColor Green

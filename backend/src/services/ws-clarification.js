@@ -4,6 +4,123 @@ async function handleClarificationChoice(ws, message, {
   mcpClient,
   roomAliases,
 } = {}) {
+  const bestEffortEmitRemoteContext = (intent, mcpResult) => {
+    if (!ws || !wsMessages || !intent) return;
+    if (!mcpResult || mcpResult.success !== true) return;
+
+    const tool = String(intent.tool || '');
+    const args = (intent.args && typeof intent.args === 'object') ? intent.args : {};
+
+    const enables = new Set([
+      'c4_tv_watch',
+      'c4_tv_watch_by_name',
+      'c4_media_watch_launch_app',
+      'c4_media_watch_launch_app_by_name',
+      // Room-scoped watch equivalent (commonly used by Gemini plans).
+      'c4_room_select_video_device',
+
+      // If the plan uses remote tools directly (e.g., power/mute/volume),
+      // the UI should still show the remote panel.
+      'c4_tv_remote',
+      'c4_tv_remote_last',
+      'c4_media_remote',
+      'c4_media_remote_sequence',
+    ]);
+    const disables = new Set([
+      'c4_tv_off',
+      'c4_tv_off_last',
+      'c4_room_off',
+    ]);
+
+    if (disables.has(tool)) {
+      ws.remoteContext = {
+        active: false,
+        kind: 'tv',
+        label: null,
+        updatedAt: new Date().toISOString(),
+      };
+      if (typeof wsMessages.sendRemoteContext === 'function') {
+        wsMessages.sendRemoteContext(ws, ws.remoteContext, 'off');
+      }
+      return;
+    }
+
+    if (!enables.has(tool)) return;
+
+    const _extractMediaDeviceIdBestEffort = () => {
+      try {
+        if (tool === 'c4_media_watch_launch_app' || tool === 'c4_media_watch_launch_app_by_name') {
+          const id = args.device_id !== undefined && args.device_id !== null ? String(args.device_id).trim() : '';
+          return id || null;
+        }
+
+        if (tool === 'c4_media_remote' || tool === 'c4_media_remote_sequence') {
+          const id = args.device_id !== undefined && args.device_id !== null ? String(args.device_id).trim() : '';
+          return id || null;
+        }
+
+        if (tool === 'c4_tv_watch') {
+          const id = args.source_device_id !== undefined && args.source_device_id !== null ? String(args.source_device_id).trim() : '';
+          return id || null;
+        }
+
+        if (tool === 'c4_tv_watch_by_name') {
+          // sendCommand wraps the raw MCP tool payload under `mcpResult.result.result`.
+          // Accept both shapes defensively.
+          const payload = (mcpResult && mcpResult.result && mcpResult.result.result && typeof mcpResult.result.result === 'object')
+            ? mcpResult.result.result
+            : (mcpResult && mcpResult.result && typeof mcpResult.result === 'object')
+              ? mcpResult.result
+              : null;
+
+          const plannedId = payload?.planned?.source_device_id;
+          if (plannedId !== undefined && plannedId !== null && String(plannedId).trim()) return String(plannedId).trim();
+
+          const resolvedId = payload?.resolve_source?.device_id;
+          if (resolvedId !== undefined && resolvedId !== null && String(resolvedId).trim()) return String(resolvedId).trim();
+
+          const argId = args.source_device_id !== undefined && args.source_device_id !== null ? String(args.source_device_id).trim() : '';
+          return argId || null;
+        }
+      } catch {
+        // Best-effort only.
+      }
+      return null;
+    };
+
+    const mediaDeviceId = _extractMediaDeviceIdBestEffort();
+
+    const roomName = (ws.currentRoom && ws.currentRoom.room_name) ? String(ws.currentRoom.room_name).trim() : '';
+    const sourceName = (typeof args.source_device_name === 'string') ? args.source_device_name.trim() : '';
+    const videoName = (typeof args.video_device_name === 'string') ? args.video_device_name.trim() : '';
+    const deviceName = (typeof args.device_name === 'string') ? args.device_name.trim() : '';
+    const app = (typeof args.app === 'string') ? args.app.trim() : '';
+    const parts = [];
+    if (roomName) parts.push(roomName);
+    if (sourceName) parts.push(sourceName);
+    else if (videoName) parts.push(videoName);
+    else if (deviceName) parts.push(deviceName);
+    if (app) parts.push(app);
+
+    ws.remoteContext = {
+      active: true,
+      kind: mediaDeviceId ? 'media' : 'tv',
+      label: parts.length ? parts.join(' — ') : null,
+      media_device_id: mediaDeviceId,
+      room: ws.currentRoom && typeof ws.currentRoom === 'object'
+        ? {
+          room_id: ws.currentRoom.room_id !== undefined && ws.currentRoom.room_id !== null ? Number(ws.currentRoom.room_id) : null,
+          room_name: ws.currentRoom.room_name ? String(ws.currentRoom.room_name) : null,
+        }
+        : undefined,
+      updatedAt: new Date().toISOString(),
+    };
+
+    if (typeof wsMessages.sendRemoteContext === 'function') {
+      wsMessages.sendRemoteContext(ws, ws.remoteContext, 'watch');
+    }
+  };
+
   const { isMoodPlan, isPresencePlan } = require('./pending-plans');
   const { buildRoomPresenceReport } = require('./room-presence');
   if (!ws || !wsMessages || !mcpClient || !roomAliases) {
@@ -90,6 +207,16 @@ async function handleClarificationChoice(ws, message, {
     return;
   }
 
+  // Defensive: ensure room clarifications actually scope the follow-up call.
+  // This prevents loops where the follow-up retries the same ambiguous query.
+  if (String(refinedIntent.tool || '') === 'c4_room_presence_report' && choice && typeof choice === 'object') {
+    refinedIntent.args = (refinedIntent.args && typeof refinedIntent.args === 'object') ? { ...refinedIntent.args } : {};
+    if (choice.name) refinedIntent.args.room_name = String(choice.name);
+    if (choice.room_id !== undefined && choice.room_id !== null && String(choice.room_id).trim() !== '') {
+      refinedIntent.args.room_id = Number(choice.room_id);
+    }
+  }
+
   const mcpResult = await mcpClient.sendCommand(refinedIntent, ws.correlationId, ws.user?.deviceId);
   if (mcpResult && mcpResult.clarification) {
     ws.pendingClarification = {
@@ -110,6 +237,8 @@ async function handleClarificationChoice(ws, message, {
     ws.pendingClarification = null;
     return;
   }
+
+  bestEffortEmitRemoteContext(refinedIntent, mcpResult);
 
   // Optional multi-step plan after clarification.
   if (isMoodPlan(pendingPlan)) {

@@ -40,6 +40,41 @@
           <span class="record-text">Tap to Speak</span>
         </button>
 
+        <!-- Remote Control Panel (shown when a TV/media session is active) -->
+        <div class="remote-panel" id="remotePanel" style="display: none;">
+          <div class="remote-title" id="remoteTitle">Remote</div>
+
+          <div class="remote-dpad" role="group" aria-label="Remote navigation">
+            <button class="remote-btn" type="button" data-remote-button="up">Up</button>
+            <button class="remote-btn" type="button" data-remote-button="left">Left</button>
+            <button class="remote-btn remote-ok" type="button" data-remote-button="ok">OK</button>
+            <button class="remote-btn" type="button" data-remote-button="right">Right</button>
+            <button class="remote-btn" type="button" data-remote-button="down">Down</button>
+          </div>
+
+          <div class="remote-row">
+            <button class="remote-btn" type="button" data-remote-button="back">Back</button>
+            <button class="remote-btn" type="button" data-remote-button="home">Home</button>
+            <button class="remote-btn" type="button" data-remote-button="menu">Menu</button>
+          </div>
+
+          <div class="remote-row">
+            <button class="remote-btn" type="button" data-remote-button="rewind">Rew</button>
+            <button class="remote-btn" type="button" data-remote-button="playpause">Play/Pause</button>
+            <button class="remote-btn" type="button" data-remote-button="fastforward">Fwd</button>
+          </div>
+
+          <div class="remote-row">
+            <button class="remote-btn" type="button" data-remote-button="volume_down">Vol -</button>
+            <button class="remote-btn" type="button" data-remote-button="mute">Mute</button>
+            <button class="remote-btn" type="button" data-remote-button="volume_up">Vol +</button>
+          </div>
+
+          <div class="remote-row">
+            <button class="remote-btn remote-power" type="button" data-remote-button="power_off">Turn Off</button>
+          </div>
+        </div>
+
         <div class="status-message" id="statusMessage"></div>
         
         <div class="transcript-container" id="transcriptContainer" style="display: none;">
@@ -68,10 +103,10 @@
   </div>
 
   <!-- Scripts -->
-  <script src="js/config.js?v=20260129-1"></script>
-  <script src="js/websocket.js?v=20260129-1"></script>
-  <script src="js/voice.js?v=20260129-1"></script>
-  <script src="js/app.js?v=20260129-1"></script>
+  <script src="js/config.js?v=20260203-2"></script>
+  <script src="js/websocket.js?v=20260203-2"></script>
+  <script src="js/voice.js?v=20260203-2"></script>
+  <script src="js/app.js?v=20260203-2"></script>
   
   <!-- Service Worker Registration -->
   <script>

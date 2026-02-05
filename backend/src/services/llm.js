@@ -108,6 +108,14 @@ function parseWithHeuristics(transcript) {
   const raw = String(transcript || '').trim();
   const t = raw.toLowerCase();
 
+  const cleanRoom = (s) => {
+    const room = String(s || '').trim();
+    if (!room) return '';
+    // Avoid treating "the" as a room.
+    if (/^the$/i.test(room)) return '';
+    return room;
+  };
+
   if (!raw) {
     return null;
   }
@@ -117,17 +125,105 @@ function parseWithHeuristics(transcript) {
     return { tool: 'c4_list_rooms', args: {} };
   }
 
-  const cleanRoom = (s) => {
-    const room = String(s || '').trim();
-    if (!room) return '';
-    // Avoid treating "the" as a room.
-    if (/^the$/i.test(room)) return '';
-    return room;
-  };
+  // Room presence
+  // Examples:
+  // - "I'm in the TV room"
+  // - "I am in TV Room"
+  // - "We're in the basement"
+  // Notes:
+  // - This sets context for follow-ups by executing c4_room_presence_report.
+  // - Ambiguity is handled upstream by clarification-required.
+  const presenceMatch = raw.match(/^\s*(?:i\s*['’]?m|i\s+am|we\s*['’]?re|we\s+are)\s+in\s+(?:the\s+)?(.+?)\s*$/i);
+  if (presenceMatch) {
+    const room = cleanRoom(presenceMatch[1]);
+    if (room) {
+      return {
+        tool: 'c4_room_presence_report',
+        args: {
+          room_name: room,
+        },
+      };
+    }
+  }
 
   // TV follow-ups (no room required; relies on MCP session memory)
   if (/\b(turn\s+off|power\s+off|shut\s+off)\b/.test(t) && /\b(tv|television)\b/.test(t)) {
     return { tool: 'c4_tv_off_last', args: {} };
+  }
+
+  // TV "watch" / source selection (room + source)
+  // Examples:
+  // - "Watch Roku in Basement"
+  // - "Watch Apple TV in Family Room"
+  const watchIn = raw.match(/^\s*watch\s+(.+?)\s+in\s+(?:the\s+)?(.+?)\s*$/i);
+  if (watchIn) {
+    const source = String(watchIn[1] || '').trim();
+    const room = cleanRoom(watchIn[2]);
+    if (source && room) {
+      return {
+        tool: 'c4_tv_watch_by_name',
+        args: {
+          room_name: room,
+          source_device_name: source,
+        },
+      };
+    }
+  }
+
+  // TV "turn on" / "watch" source selection without an explicit "in".
+  // Example:
+  // - "Turn on the Basement Roku" -> room="Basement", source="Roku"
+  // Heuristic: if the phrase looks like "<room> <source>", treat the tail as the source.
+  const watchRoomSource = raw.match(/^\s*(?:turn\s+on|switch\s+on|watch)\s+(?:the\s+)?(.+?)\s*$/i);
+  if (watchRoomSource) {
+    const rest = String(watchRoomSource[1] || '').trim();
+    if (rest) {
+      // Avoid hijacking light commands like "Turn on the kitchen lights".
+      if (/\b(lights?|lamps?)\b/i.test(rest)) {
+        // fall through to lights heuristics below
+      } else {
+      const multiWordSources = [
+        'apple tv',
+        'fire tv',
+        'chrome cast',
+        'chromecast',
+        'xbox one',
+        'xbox series x',
+        'xbox series s',
+        'playstation 5',
+        'playstation 4',
+        'ps5',
+        'ps4',
+      ].sort((a, b) => b.length - a.length);
+
+      const restLower = rest.toLowerCase();
+      let source;
+      let roomPart;
+
+      const matchedTail = multiWordSources.find((s) => restLower === s || restLower.endsWith(` ${s}`));
+      if (matchedTail) {
+        source = rest.slice(rest.length - matchedTail.length).trim();
+        roomPart = rest.slice(0, rest.length - matchedTail.length).trim();
+      } else {
+        const parts = rest.split(/\s+/).filter(Boolean);
+        if (parts.length >= 2) {
+          source = parts[parts.length - 1];
+          roomPart = parts.slice(0, -1).join(' ');
+        }
+      }
+
+      const room = cleanRoom(roomPart);
+      if (room && source) {
+        return {
+          tool: 'c4_tv_watch_by_name',
+          args: {
+            room_name: room,
+            source_device_name: String(source).trim(),
+          },
+        };
+      }
+      }
+    }
   }
 
   if (/\b(mute)\b/.test(t)) {

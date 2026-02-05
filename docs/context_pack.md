@@ -11,13 +11,17 @@
 - Backend WebSocket: `ws://192.168.1.237:3002/ws?token=<jwt>` (or `wss://192.168.1.237/ws?token=<jwt>` if proxy routes `/ws`)
 - c4-mcp HTTP base URL (host port mapping): `http://192.168.1.237:3334`
 
+**Production env/secrets (NAS Compose):** keep backend env vars in a stable external `env_file` (example: `/volume1/dockerc4-mcp/c4-voice-secrets/backend.env`) so redeploys/re-clones do not overwrite/corrupt runtime config.
+
 ## Mini executive summary (≤120 words)
 
 c4-mcp-app is a lightweight voice + text UI for controlling Control4. A PWA frontend (served over HTTPS on the NAS) captures mic audio (MediaRecorder, with a WAV fallback for iOS/Safari) or sends text to a Node.js backend (Express + WebSocket). The backend uses cloud STT to produce a transcript, then uses an LLM (Gemini current) to produce a deterministic tool plan (`{ tool, args }`), and executes that plan by calling the separate `c4-mcp` HTTP server (`/mcp/call`). The repos remain decoupled: integration happens only over `C4_MCP_BASE_URL`. Conversational memory lives in `c4-mcp`; the app passes a stable per-device session id (deviceId) via `X-Session-Id` so follow-ups can use `*_last` tools. The backend enforces timeouts and the UI watchdog prevents “stuck executing…”.
 
+Note: In production on the NAS, speech-to-text is expected to run via a local Whisper-compatible HTTP service (no cloud STT API key required). Cloud STT providers can be enabled via environment variables, but should not be required for normal operation.
+
 ## Critical architecture bullets (≤6)
 
-- Voice: PWA mic → WS audio → backend STT → backend LLM plan → `c4-mcp` tool call → WS results.
+- Voice: PWA mic → WS audio → backend STT (local Whisper on NAS) → backend LLM plan → `c4-mcp` tool call → WS results.
 - Text: PWA chat → `POST /api/v1/voice/process-text` → LLM plan → `c4-mcp` tool call.
 - Boundary: only HTTP calls to `c4-mcp` (no shared code; configured via `C4_MCP_BASE_URL`).
 - Session: backend sends `X-Session-Id: <deviceId>` to `c4-mcp` for follow-ups.

@@ -1,7 +1,7 @@
 # Project Overview: C4-MCP-App
 
 **Version:** 1.0.0  
-**Last Updated:** January 29, 2026  
+**Last Updated:** February 5, 2026  
 **Status:** ✅ DEPLOYED - Running in Production
 
 ---
@@ -299,7 +299,7 @@ For clarification retries, the backend should prefer stable identifiers (e.g., `
 **WebSocket Response Stream:**
 ```json
 {
-  "type": "connected|processing|transcript|intent|command-complete|clarification-required|error",
+  "type": "connected|processing|transcript|intent|command-complete|remote-context|clarification-required|error",
   "stage": "transcription|intent-parsing|executing",
   "correlationId": "c-...",
   "message": "...",
@@ -370,7 +370,7 @@ Response:
 
 ### ADR-002: Cloud-Based AI Services
 - **Context:** DS218+ cannot run local LLMs or heavy ML workloads
-- **Decision:** Use cloud STT (Google/Azure) and cloud LLM (OpenAI; tested with `gpt-4o-mini`)
+- **Decision:** Use cloud STT (Google/Azure) and a cloud LLM (Gemini current with a locked system prompt; OpenAI optional)
 - **Rationale:** Offload compute to cloud; NAS only coordinates
 - **Consequences:** Network dependency, API costs, latency ~500-1500ms
 
@@ -397,6 +397,12 @@ Response:
 - **Decision:** HTTPS + simple token auth + action logging
 - **Rationale:** Balance security and complexity; avoid OAuth/SAML overhead
 - **Consequences:** Not suitable for multi-tenant or public deployment
+
+### ADR-007: Keep MCP Strict; Normalize at the Boundary
+- **Context:** `c4-mcp` enforces strict tool schemas; schema-invalid calls can fail fast.
+- **Decision:** Keep `c4-mcp` strict; implement argument normalization + best-effort preflight/fallback in the backend boundary.
+- **Rationale:** Prevent avoidable runtime errors (e.g., missing required args) without weakening the MCP contract.
+- **Consequences:** The backend must treat tool schemas as authoritative (`/mcp/list`) and maintain tests for normalization/fallback paths.
 
 ---
 
@@ -492,10 +498,10 @@ Response:
 
 1. **Enable Web Station:**
    - Open DSM → Web Station → Enable Web Station
-   - Create virtual host for PWA (document root: `/volume1/web/c4-mcp-app/frontend`)
+  - Create virtual host for PWA (document root: `/volume1/web`)
 
 2. **Deploy PWA:**
-   - Upload `frontend/` contents to `/volume1/web/c4-mcp-app/frontend`
+  - Upload `frontend/` contents to `/volume1/web`
    - Verify access: `http://<NAS_IP>:80`
 
 3. **Install Backend Dependencies:**
@@ -505,10 +511,11 @@ Response:
   - Install dependencies: `npm install`
 
 4. **Configure Environment Variables:**
-   - Copy `.env.example` to `.env`
-  - Set STT provider keys (`GOOGLE_STT_API_KEY` / `AZURE_STT_KEY` / `AZURE_STT_REGION`), `OPENAI_API_KEY`, and `C4_MCP_BASE_URL` (+ `C4_MCP_TIMEOUT_MS`)
+   - Create `.env` only if missing (avoid overwriting an existing file):
+     - `test -f .env || cp .env.example .env`
+   - Set STT provider keys (`GOOGLE_STT_API_KEY` / `AZURE_STT_KEY` / `AZURE_STT_REGION`), `OPENAI_API_KEY`, and `C4_MCP_BASE_URL` (+ `C4_MCP_TIMEOUT_MS`)
 
-  If deploying via **Synology Container Manager (Compose)**, prefer setting these as container environment variables (or via a compose-managed `.env`), and skip the Task Scheduler/native process steps below.
+  If deploying via **Synology Container Manager (Compose)**, prefer an `env_file` that points at a stable secrets file outside any repo checkout (recommended) and skip the Task Scheduler/native process steps below.
 
 5. **Create Startup Script:**
    - Save to `/volume1/apps/c4-mcp-app/scripts/start-backend.sh`:
@@ -545,9 +552,12 @@ Response:
 
 ### 10.3 Secrets Management
 
-- Store secrets in `/volume1/apps/c4-mcp-app/backend/.env`
-- Restrict permissions: `chmod 600 .env`
-- Never commit `.env` to Git
+- **Compose (recommended):** store secrets in a stable external env file referenced via `env_file` (e.g., `/volume1/dockerc4-mcp/c4-voice-secrets/backend.env`).
+  - Restrict permissions (example): `chmod 400 backend.env`
+  - Keep this file outside any repo checkout so deploys can't overwrite it.
+- **Legacy native Node:** store secrets in `backend/.env` on the NAS.
+  - Restrict permissions: `chmod 600 .env`
+- Never commit secrets files to Git.
 
 ### 10.4 Configuration
 

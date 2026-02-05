@@ -11,7 +11,7 @@ cd /volume1/web/c4-mcp-app/backend
 /volume1/@appstore/Node.js_v22/usr/local/bin/node /volume1/@appstore/Node.js_v22/usr/local/lib/node_modules/npm/bin/npm-cli.js install --omit=dev
 
 # 4. Copy .env template
-cp .env.example .env
+test -f .env || cp .env.example .env
 chmod 600 .env
 
 # 5. Edit .env with your API keys

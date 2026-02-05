@@ -12,7 +12,10 @@ This repo includes a Synology Container Manager-ready stack that runs:
 - `nas/backend/Dockerfile.githubzip` — backend build that pulls source from GitHub zip (useful when only the compose project exists on the NAS)
 
 ## Configure
-1. Copy `nas/backend/.env.example` to `nas/backend/.env` and fill in API keys.
+1. Create a stable secrets file used by Compose (recommended):
+	- Create `secrets/backend.env` in the compose project folder (same folder as `compose.nas.yaml`).
+	- Use `nas/backend/.env.example` as the template.
+	- Do not keep secrets in the repo checkout, and do not overwrite this file during deploys.
 2. Copy your `c4-mcp` Control4 credentials config to `nas/c4-mcp/config/config.json`.
 	- This file is local to the NAS project folder and should never be committed to Git.
 

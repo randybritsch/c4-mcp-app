@@ -467,6 +467,133 @@ const _bestEffortEmitRoomContext = async (ws, transcript, {
   }
 };
 
+const _bestEffortEmitRemoteContext = (ws, {
+  wsMessages,
+  intent,
+  mcpResult,
+} = {}) => {
+  if (!ws || !wsMessages || !intent) return;
+
+  // Only react to successful commands.
+  if (!mcpResult || mcpResult.success !== true) return;
+
+  const tool = String(intent.tool || '');
+  const args = (intent.args && typeof intent.args === 'object') ? intent.args : {};
+
+  const enables = new Set([
+    'c4_tv_watch',
+    'c4_tv_watch_by_name',
+    'c4_media_watch_launch_app',
+    'c4_media_watch_launch_app_by_name',
+    // Room-scoped watch equivalent (commonly used by Gemini plans).
+    'c4_room_select_video_device',
+
+    // If the plan uses remote tools directly (e.g., power/mute/volume),
+    // the UI should still show the remote panel.
+    'c4_tv_remote',
+    'c4_tv_remote_last',
+    'c4_media_remote',
+    'c4_media_remote_sequence',
+  ]);
+
+  const disables = new Set([
+    'c4_tv_off',
+    'c4_tv_off_last',
+    'c4_room_off',
+  ]);
+
+  if (disables.has(tool)) {
+    ws.remoteContext = {
+      active: false,
+      kind: 'tv',
+      label: null,
+      updatedAt: new Date().toISOString(),
+    };
+    if (typeof wsMessages.sendRemoteContext === 'function') {
+      wsMessages.sendRemoteContext(ws, ws.remoteContext, 'off');
+    }
+    return;
+  }
+
+  if (!enables.has(tool)) return;
+
+  // Best-effort: capture the specific media device being controlled so we can route
+  // button presses to c4_media_remote when available (e.g., AppleTV/Roku).
+  const _extractMediaDeviceIdBestEffort = () => {
+    try {
+      if (tool === 'c4_media_watch_launch_app' || tool === 'c4_media_watch_launch_app_by_name') {
+        const id = args.device_id !== undefined && args.device_id !== null ? String(args.device_id).trim() : '';
+        return id || null;
+      }
+
+      if (tool === 'c4_media_remote' || tool === 'c4_media_remote_sequence') {
+        const id = args.device_id !== undefined && args.device_id !== null ? String(args.device_id).trim() : '';
+        return id || null;
+      }
+
+      if (tool === 'c4_tv_watch') {
+        const id = args.source_device_id !== undefined && args.source_device_id !== null ? String(args.source_device_id).trim() : '';
+        return id || null;
+      }
+
+      if (tool === 'c4_tv_watch_by_name') {
+        // sendCommand wraps the raw MCP tool payload under `mcpResult.result.result`.
+        // Some older code paths may still produce `mcpResult.result.*`, so accept both.
+        const payload = (mcpResult && mcpResult.result && mcpResult.result.result && typeof mcpResult.result.result === 'object')
+          ? mcpResult.result.result
+          : (mcpResult && mcpResult.result && typeof mcpResult.result === 'object')
+            ? mcpResult.result
+            : null;
+
+        const plannedId = payload?.planned?.source_device_id;
+        if (plannedId !== undefined && plannedId !== null && String(plannedId).trim()) return String(plannedId).trim();
+
+        const resolvedId = payload?.resolve_source?.device_id;
+        if (resolvedId !== undefined && resolvedId !== null && String(resolvedId).trim()) return String(resolvedId).trim();
+
+        const argId = args.source_device_id !== undefined && args.source_device_id !== null ? String(args.source_device_id).trim() : '';
+        return argId || null;
+      }
+    } catch {
+      // Best-effort only.
+    }
+    return null;
+  };
+
+  const mediaDeviceId = _extractMediaDeviceIdBestEffort();
+
+  const roomName = (ws.currentRoom && ws.currentRoom.room_name) ? String(ws.currentRoom.room_name).trim() : '';
+  const sourceName = (typeof args.source_device_name === 'string') ? args.source_device_name.trim() : '';
+  const videoName = (typeof args.video_device_name === 'string') ? args.video_device_name.trim() : '';
+  const deviceName = (typeof args.device_name === 'string') ? args.device_name.trim() : '';
+  const app = (typeof args.app === 'string') ? args.app.trim() : '';
+
+  const parts = [];
+  if (roomName) parts.push(roomName);
+  if (sourceName) parts.push(sourceName);
+  else if (videoName) parts.push(videoName);
+  else if (deviceName) parts.push(deviceName);
+  if (app) parts.push(app);
+
+  ws.remoteContext = {
+    active: true,
+    kind: mediaDeviceId ? 'media' : 'tv',
+    label: parts.length ? parts.join(' — ') : null,
+    media_device_id: mediaDeviceId,
+    room: ws.currentRoom && typeof ws.currentRoom === 'object'
+      ? {
+        room_id: ws.currentRoom.room_id !== undefined && ws.currentRoom.room_id !== null ? Number(ws.currentRoom.room_id) : null,
+        room_name: ws.currentRoom.room_name ? String(ws.currentRoom.room_name) : null,
+      }
+      : undefined,
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (typeof wsMessages.sendRemoteContext === 'function') {
+    wsMessages.sendRemoteContext(ws, ws.remoteContext, 'watch');
+  }
+};
+
 const _bestEffortPickClarificationChoiceIndex = (ws, clarification) => {
   if (!ws || !clarification || typeof clarification !== 'object') return null;
   if (!ws.currentRoom || typeof ws.currentRoom !== 'object') return null;
@@ -631,6 +758,78 @@ const _bestEffortPreflightRoomNameRequiredTools = async (ws, transcript, {
   return { didHandle: true };
 };
 
+const _bestEffortPreflightMediaLaunchRequiresApp = async (ws, transcript, {
+  wsMessages,
+  intent,
+} = {}) => {
+  if (!ws || !wsMessages || !intent) return { didHandle: false };
+
+  const tool = String(intent.tool || '');
+  if (tool !== 'c4_media_watch_launch_app_by_name' && tool !== 'c4_media_watch_launch_app') {
+    return { didHandle: false };
+  }
+
+  const args = (intent.args && typeof intent.args === 'object') ? intent.args : {};
+  intent.args = args;
+
+  const app = (typeof args.app === 'string' && args.app.trim())
+    ? args.app.trim()
+    : (typeof args.app_name === 'string' && args.app_name.trim())
+      ? args.app_name.trim()
+      : (typeof args.appName === 'string' && args.appName.trim())
+        ? args.appName.trim()
+        : '';
+
+  // If the LLM provided an app under a variant key, normalize in-place.
+  if (!app) {
+    // Without an app, calling c4_media_watch_launch_app_by_name will 500 in c4-mcp.
+    // Interpret this as “turn on/watch that device” and fall back to c4_tv_watch_by_name.
+    const deviceName = (typeof args.device_name === 'string' && args.device_name.trim())
+      ? args.device_name.trim()
+      : (typeof args.source_device_name === 'string' && args.source_device_name.trim())
+        ? args.source_device_name.trim()
+        : (typeof args.deviceName === 'string' && args.deviceName.trim())
+          ? args.deviceName.trim()
+          : '';
+
+    if (deviceName) {
+      intent.tool = 'c4_tv_watch_by_name';
+      intent.args = {
+        ...(args.room_id !== undefined ? { room_id: args.room_id } : {}),
+        ...(typeof args.room_name === 'string' && args.room_name.trim() ? { room_name: args.room_name.trim() } : {}),
+        source_device_name: deviceName,
+        ...(args.require_unique !== undefined ? { require_unique: args.require_unique } : {}),
+        ...(args.include_candidates !== undefined ? { include_candidates: args.include_candidates } : {}),
+      };
+      return { didHandle: false };
+    }
+
+    ws.pendingClarification = {
+      transcript,
+      intent,
+      clarification: {
+        kind: 'choice',
+        query: null,
+        prompt: 'Which app do you want to launch?',
+        candidates: [],
+      },
+    };
+
+    wsMessages.sendError(ws, {
+      code: 'MISSING_APP',
+      message: 'Which app do you want to launch? (e.g., “Netflix” or “YouTube”)',
+    });
+    return { didHandle: true };
+  }
+
+  // App exists; normalize it to args.app for downstream.
+  if (!args.app || typeof args.app !== 'string') args.app = String(app);
+  delete args.app_name;
+  delete args.appName;
+
+  return { didHandle: false };
+};
+
 async function processTranscript(ws, transcript, {
   logger,
   wsMessages,
@@ -681,6 +880,16 @@ async function processTranscript(ws, transcript, {
       sessionId: ws.user?.deviceId,
     });
     if (preflight && preflight.didHandle) {
+      ws.audioChunks = [];
+      return;
+    }
+
+    // Preflight: avoid calling media launch tools without required `app`.
+    const mediaPreflight = await _bestEffortPreflightMediaLaunchRequiresApp(ws, safeTranscript, {
+      wsMessages,
+      intent,
+    });
+    if (mediaPreflight && mediaPreflight.didHandle) {
       ws.audioChunks = [];
       return;
     }
@@ -760,12 +969,15 @@ async function processTranscript(ws, transcript, {
         });
 
         if (!rerun || rerun.success !== true) {
-          const errorMessage = rerun && rerun.result && rerun.result.error
-            ? rerun.result.error
-            : 'Command failed';
-          throw new Error(errorMessage);
+          const errorMessage = (rerun && rerun.result && rerun.result.error)
+            || (rerun && rerun.result && rerun.result.result && rerun.result.result.error)
+            || 'Command failed';
+          const err = new Error(errorMessage);
+          err.details = rerun;
+          throw err;
         }
 
+        _bestEffortEmitRemoteContext(ws, { wsMessages, intent: watchIntent, mcpResult: rerun });
         wsMessages.sendCommandComplete(ws, rerun, safeTranscript, watchIntent);
         ws.audioChunks = [];
         return;
@@ -806,6 +1018,8 @@ async function processTranscript(ws, transcript, {
       mcpResult,
     });
 
+    _bestEffortEmitRemoteContext(ws, { wsMessages, intent, mcpResult });
+
     if (mcpResult && mcpResult.clarification) {
       // Best-effort: keep UI choices friendly by sorting candidates, but do NOT auto-select.
       try {
@@ -826,10 +1040,12 @@ async function processTranscript(ws, transcript, {
     }
 
     if (!mcpResult || mcpResult.success !== true) {
-      const errorMessage = mcpResult && mcpResult.result && mcpResult.result.error
-        ? mcpResult.result.error
-        : 'Command failed';
-      throw new Error(errorMessage);
+      const errorMessage = (mcpResult && mcpResult.result && mcpResult.result.error)
+        || (mcpResult && mcpResult.result && mcpResult.result.result && mcpResult.result.result.error)
+        || 'Command failed';
+      const err = new Error(errorMessage);
+      err.details = mcpResult;
+      throw err;
     }
 
     wsMessages.sendCommandComplete(ws, mcpResult, safeTranscript, intent);
@@ -844,6 +1060,7 @@ async function processTranscript(ws, transcript, {
     wsMessages.sendError(ws, {
       code: 'PROCESSING_ERROR',
       message: error.message,
+      details: error && typeof error === 'object' ? error.details : undefined,
     });
 
     ws.audioChunks = [];
@@ -906,6 +1123,7 @@ async function processAudioStream(ws, {
     wsMessages.sendError(ws, {
       code: error.code || 'PROCESSING_ERROR',
       message: error.message,
+      details: error && typeof error === 'object' ? error.details : undefined,
     });
 
     ws.audioChunks = [];

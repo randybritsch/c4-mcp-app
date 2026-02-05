@@ -614,6 +614,73 @@ describe('ws-audio-pipeline room_name-required tool preflight', () => {
   });
 });
 
+describe('ws-audio-pipeline media launch app preflight', () => {
+  test('missing app for c4_media_watch_launch_app_by_name falls back to c4_tv_watch_by_name', async () => {
+    const { processAudioStream, restore } = loadProcessAudioStreamWithEnv({
+      MOOD_PLANS_ENABLED: '',
+      MOOD_MUSIC_ENABLED: '',
+      MOOD_MUSIC_SOURCE_NAME: '',
+    });
+
+    const ws = makeWs();
+
+    const wsMessages = {
+      sendError: jest.fn(),
+      sendProcessing: jest.fn(),
+      sendTranscript: jest.fn(),
+      sendIntent: jest.fn(),
+      sendClarificationRequired: jest.fn(),
+      sendCommandComplete: jest.fn(),
+    };
+
+    const logger = {
+      info: jest.fn(),
+      error: jest.fn(),
+    };
+
+    const transcribeAudio = jest.fn().mockResolvedValue({
+      transcript: 'Turn on the Roku in the TV Room',
+      confidence: 0.9,
+    });
+
+    const parseIntent = jest.fn().mockResolvedValue({
+      tool: 'c4_media_watch_launch_app_by_name',
+      args: { room_name: 'TV Room', device_name: 'Roku' },
+    });
+
+    const mcpClient = {
+      sendCommand: jest.fn().mockResolvedValue({ success: true }),
+      buildRefinedIntentFromChoice: jest.fn(),
+      getAllowedToolCatalogForLlm: jest.fn().mockResolvedValue(null),
+    };
+
+    const roomAliases = {
+      applyRoomAliasToIntent: jest.fn(),
+    };
+
+    await processAudioStream(ws, {
+      logger,
+      wsMessages,
+      transcribeAudio,
+      parseIntent,
+      mcpClient,
+      roomAliases,
+    });
+
+    restore();
+
+    expect(wsMessages.sendError).not.toHaveBeenCalled();
+    expect(mcpClient.sendCommand).toHaveBeenCalledTimes(1);
+
+    const firstCall = mcpClient.sendCommand.mock.calls[0][0];
+    expect(firstCall.tool).toBe('c4_tv_watch_by_name');
+    expect(firstCall.args).toEqual(expect.objectContaining({
+      room_name: 'TV Room',
+      source_device_name: 'Roku',
+    }));
+  });
+});
+
 describe('ws-audio-pipeline current-room biased ambiguity resolution', () => {
   test('does not auto-resolve TV device ambiguity; asks the user to choose', async () => {
     const { processAudioStream, restore } = loadProcessAudioStreamWithEnv({

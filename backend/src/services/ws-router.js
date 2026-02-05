@@ -92,6 +92,130 @@ async function handleMessage(ws, data, {
         });
         break;
 
+      case 'remote-control': {
+        if (!mcpClient) {
+          wsMessages.sendError(ws, { code: 'MISSING_MCP_CLIENT', message: 'MCP client not available' });
+          break;
+        }
+
+        const button = message && typeof message.button === 'string' ? message.button.trim() : '';
+        if (!button) {
+          wsMessages.sendError(ws, { code: 'MISSING_REMOTE_BUTTON', message: 'remote-control button is required' });
+          break;
+        }
+
+        wsMessages.sendProcessing(ws, 'executing');
+
+        const isPowerOff = button === 'power_off' || button === 'off';
+
+        const mediaDeviceIdRaw = ws && ws.remoteContext && ws.remoteContext.media_device_id !== undefined
+          ? String(ws.remoteContext.media_device_id || '').trim()
+          : '';
+        const mediaDeviceId = mediaDeviceIdRaw || null;
+
+        const _isMediaNavButton = (b) => {
+          const x = String(b || '').trim().toLowerCase();
+          return [
+            'up', 'down', 'left', 'right',
+            'enter', 'select',
+            'back', 'home', 'menu',
+            'playpause', 'rewind', 'fastforward',
+          ].includes(x);
+        };
+
+        const _mapToMediaRemoteButton = (b) => {
+          const x = String(b || '').trim().toLowerCase();
+          if (x === 'enter') return 'select';
+          return x;
+        };
+
+        const _buildTranscript = () => (isPowerOff ? 'Remote: turn off' : `Remote: ${button}`);
+
+        const transcript = _buildTranscript();
+
+        // Power is room-scoped (TV off), not device-scoped.
+        const offIntent = { tool: 'c4_tv_off_last', args: { confirm_timeout_s: 6 } };
+        const tvRemoteIntent = { tool: 'c4_tv_remote_last', args: { button } };
+        const mediaRemoteIntent = (mediaDeviceId && _isMediaNavButton(button))
+          ? { tool: 'c4_media_remote', args: { device_id: mediaDeviceId, button: _mapToMediaRemoteButton(button), press: 'Tap' } }
+          : null;
+
+        try {
+          logger.info({
+            event: 'remote-control',
+            correlationId: ws?.correlationId,
+            button,
+            mediaDeviceId,
+            isPowerOff,
+            willPrefer: isPowerOff ? 'tv_off_last' : (mediaRemoteIntent ? 'media_remote' : 'tv_remote_last'),
+          });
+        } catch { /* ignore logging errors */ }
+
+        try {
+          let mcpResult = null;
+          let intent = null;
+
+          if (isPowerOff) {
+            intent = offIntent;
+            mcpResult = await mcpClient.sendCommand(intent, ws.correlationId, ws.user?.deviceId);
+          } else if (mediaRemoteIntent) {
+            // Prefer device-scoped media remote for AppleTV/Roku/etc.
+            intent = mediaRemoteIntent;
+            mcpResult = await mcpClient.sendCommand(intent, ws.correlationId, ws.user?.deviceId);
+
+            // Fallback: room-level TV remote (volume/mute + installs without media remote support).
+            if (!mcpResult || mcpResult.success !== true) {
+              intent = tvRemoteIntent;
+              mcpResult = await mcpClient.sendCommand(intent, ws.correlationId, ws.user?.deviceId);
+            }
+          } else {
+            intent = tvRemoteIntent;
+            mcpResult = await mcpClient.sendCommand(intent, ws.correlationId, ws.user?.deviceId);
+          }
+
+          try {
+            logger.info({
+              event: 'remote-control-result',
+              correlationId: ws?.correlationId,
+              tool: intent?.tool,
+              success: mcpResult?.success,
+            });
+          } catch { /* ignore logging errors */ }
+
+          if (!mcpResult || mcpResult.success !== true) {
+            wsMessages.sendError(ws, {
+              code: 'REMOTE_COMMAND_FAILED',
+              message: 'Remote command failed',
+              details: mcpResult,
+            });
+            break;
+          }
+
+          // If we successfully turned the TV off, update remote UI state.
+          if (isPowerOff) {
+            ws.remoteContext = {
+              active: false,
+              kind: 'tv',
+              label: null,
+              media_device_id: null,
+              updatedAt: new Date().toISOString(),
+            };
+            if (typeof wsMessages.sendRemoteContext === 'function') {
+              wsMessages.sendRemoteContext(ws, ws.remoteContext, 'off');
+            }
+          }
+
+          wsMessages.sendCommandComplete(ws, mcpResult, transcript, intent);
+        } catch (e) {
+          wsMessages.sendError(ws, {
+            code: 'REMOTE_COMMAND_ERROR',
+            message: e && e.message ? e.message : String(e),
+          });
+        }
+
+        break;
+      }
+
       case 'ping':
         wsMessages.sendPong(ws);
         break;

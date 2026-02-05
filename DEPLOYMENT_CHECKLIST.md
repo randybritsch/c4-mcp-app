@@ -23,7 +23,7 @@ This checklist contains both the **current reference deployment** (Synology Cont
 - [ ] Confirm `frontend/manifest.json` paths match generated filenames
 
 ### 2. Environment Configuration
-- [ ] Backend `.env` created from `.env.example`
+- [ ] Backend env configured (Compose: `env_file` points at a stable secrets file; legacy: `backend/.env`)
 - [ ] JWT_SECRET generated (64+ character random string)
 - [ ] STT provider configured (Google or Azure with valid API key)
 - [ ] LLM provider configured (OpenAI supported; Anthropic is not implemented)

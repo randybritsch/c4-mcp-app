@@ -30,9 +30,9 @@ rsync -avz --exclude='node_modules' --exclude='.env' --exclude='*.log' \
 echo "[3/6] Installing Node.js dependencies..."
 ssh ${NAS_USER}@${NAS_HOST} "cd ${NAS_BACKEND_DIR} && npm install --production"
 
-# Step 4: Setup .env file
-echo "[4/6] Setting up .env file..."
-ssh ${NAS_USER}@${NAS_HOST} "cd ${NAS_BACKEND_DIR} && cp .env.example .env && chmod 600 .env"
+# Step 4: Setup .env file (do not overwrite existing secrets)
+echo "[4/6] Ensuring .env exists (will not overwrite)..."
+ssh ${NAS_USER}@${NAS_HOST} "cd ${NAS_BACKEND_DIR} && if [ -f .env ]; then echo '  ✓ .env exists; leaving as-is'; else cp .env.example .env && chmod 600 .env && echo '  ✓ Created .env from .env.example'; fi"
 
 # Step 5: Test health check
 echo "[5/6] Testing health check script..."

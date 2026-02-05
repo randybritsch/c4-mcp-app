@@ -2,6 +2,20 @@ const config = require('../config');
 const { AppError, ErrorCodes } = require('../utils/errors');
 const logger = require('../utils/logger');
 
+function estimateBase64DecodedBytesLength(base64) {
+  if (!base64 || typeof base64 !== 'string') return 0;
+  const s = base64.trim();
+  const len = s.length;
+  if (!len) return 0;
+
+  // Base64 decoded size is ~ 3/4 the encoded length, minus padding.
+  let padding = 0;
+  if (s.endsWith('==')) padding = 2;
+  else if (s.endsWith('=')) padding = 1;
+  const decoded = Math.floor((len * 3) / 4) - padding;
+  return decoded > 0 ? decoded : 0;
+}
+
 async function fetchJsonWithTimeout(url, options, timeoutMs) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), Number(timeoutMs) || 0);
@@ -33,8 +47,29 @@ async function fetchJsonWithTimeout(url, options, timeoutMs) {
  */
 async function transcribeWithWhisper(audioBase64, format, correlationId) {
   const whisper = config?.stt?.whisper || {};
-  const baseUrl = String(whisper.baseUrl || '').trim().replace(/\/+$/, '');
-  const model = String(whisper.model || '').trim() || 'base.en';
+  // Accept either a root URL (preferred) or a URL ending in `/v1`.
+  // Normalize to root so we don't accidentally call `/v1/v1/...`.
+  const baseUrlRaw = String(whisper.baseUrl || '').trim().replace(/\/+$/, '');
+  const baseUrl = baseUrlRaw
+    // Common misconfigurations: people paste a full endpoint.
+    // Normalize to service root so we always append `/v1/...` ourselves.
+    .replace(/\/+v1\/+audio\/+transcriptions$/i, '')
+    .replace(/\/+v1\/+audio\/+translations$/i, '')
+    .replace(/\/+v1\/+audio$/i, '')
+    .replace(/\/+v1$/i, '');
+  const modelRaw = String(whisper.model || '').trim();
+  const model = (() => {
+    const m = modelRaw || 'Systran/faster-distil-whisper-small.en';
+    const normalized = String(m).trim().replace(/\s+/g, ' ');
+    const lower = normalized.toLowerCase();
+
+    // Common legacy shorthand. Speaches expects repo-style model IDs.
+    if (lower === 'base.en' || lower === 'base en' || lower === 'base_en' || lower === 'base') {
+      return 'Systran/faster-distil-whisper-small.en';
+    }
+
+    return normalized;
+  })();
   const language = String(whisper.language || '').trim();
   const apiKey = String(whisper.apiKey || '').trim();
 
@@ -57,11 +92,31 @@ async function transcribeWithWhisper(audioBase64, format, correlationId) {
   const mime = mimeMap[formatLower] || 'application/octet-stream';
   const filename = `audio.${formatLower || 'webm'}`;
 
+  const requestDebug = {
+    provider: 'whisper',
+    format: formatLower,
+    mime,
+    filename,
+    baseUrl: baseUrlRaw,
+    normalizedBaseUrl: baseUrl,
+    model,
+    language: language || null,
+  };
+
   try {
     const url = `${baseUrl}/v1/audio/transcriptions`;
     const timeoutMs = config.stt.timeoutMs || 15000;
 
+    const requestMeta = {
+      ...requestDebug,
+      url,
+      method: 'POST',
+      timeoutMs,
+    };
+
     const audioBytes = Buffer.from(audioBase64, 'base64');
+    requestMeta.audioBytesLength = audioBytes.length;
+
     const form = new FormData();
     form.append('model', model);
     if (language) form.append('language', language);
@@ -81,8 +136,45 @@ async function transcribeWithWhisper(audioBase64, format, correlationId) {
     );
 
     if (!resp.ok) {
-      const message = data && typeof data === 'object' ? (data.error?.message || data.message) : null;
-      throw new Error(message || `Whisper STT error (${resp.status})`);
+      const responseSnippet = (() => {
+        if (data === null || data === undefined) return null;
+        if (typeof data === 'string') return data.slice(0, 1200);
+        if (typeof data === 'object') {
+          const raw = typeof data.raw === 'string' ? data.raw : null;
+          if (raw) return raw.slice(0, 1200);
+          try {
+            return JSON.stringify(data).slice(0, 1200);
+          } catch {
+            return '[unserializable-json]';
+          }
+        }
+        try {
+          return String(data).slice(0, 1200);
+        } catch {
+          return '[unstringifiable]';
+        }
+      })();
+
+      const messageFromBody = data && typeof data === 'object'
+        ? (data.error?.message || data.message || data.detail)
+        : null;
+      const status = Number(resp.status);
+      const statusPart = Number.isFinite(status) ? status : resp.status;
+      const msg = messageFromBody
+        ? `Whisper STT error (${statusPart}) at ${url}: ${messageFromBody}`
+        : `Whisper STT error (${statusPart}) at ${url}`;
+
+      throw new AppError(
+        ErrorCodes.STT_ERROR,
+        msg,
+        502,
+        {
+          ...requestMeta,
+          status: resp.status,
+          statusText: resp.statusText,
+          responseSnippet,
+        },
+      );
     }
 
     const transcript = (() => {
@@ -95,21 +187,36 @@ async function transcribeWithWhisper(audioBase64, format, correlationId) {
 
     return { transcript, confidence: 0 };
   } catch (error) {
+    if (error instanceof AppError) {
+      logger.error('Whisper STT error', {
+        correlationId,
+        error: error.message,
+        ...requestDebug,
+        ...(error.details && typeof error.details === 'object' ? error.details : {}),
+      });
+      throw error;
+    }
+
     if (error && error.name === 'AbortError') {
       const timeoutMs = config.stt.timeoutMs || 15000;
       throw new AppError(
         ErrorCodes.STT_TIMEOUT,
         `Speech-to-text timed out after ${timeoutMs}ms`,
         504,
-        { correlationId, timeoutMs, provider: 'whisper' },
+        { correlationId, timeoutMs, ...requestDebug },
       );
     }
 
-    logger.error('Whisper STT error', { correlationId, error: error.message });
+    logger.error('Whisper STT error', {
+      correlationId,
+      error: error.message,
+      ...requestDebug,
+    });
     throw new AppError(
       ErrorCodes.STT_ERROR,
       `Speech-to-text failed: ${error.message}`,
       500,
+      requestDebug,
     );
   }
 }
@@ -216,10 +323,13 @@ async function transcribeWithAzure(_audioBase64, _format) {
  * Transcribe audio using configured STT provider
  */
 async function transcribeAudio(audioBase64, format, correlationId, sampleRateHertz) {
+  const audioBytesLength = estimateBase64DecodedBytesLength(audioBase64);
+
   logger.info('Starting transcription', {
     correlationId,
     provider: config.stt.provider,
     format,
+    audioBytesLength,
   });
 
   const startTime = Date.now();
@@ -250,6 +360,7 @@ async function transcribeAudio(audioBase64, format, correlationId, sampleRateHer
     duration,
     confidence: normalizedConfidence,
     transcriptLength: normalizedTranscript.length,
+    audioBytesLength,
   });
 
   return {

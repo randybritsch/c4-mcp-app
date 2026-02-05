@@ -50,7 +50,8 @@ function getOverrides() {
 const overrides = getOverrides();
 
 // Default backend selection:
-// - If the UI is served over HTTPS, default to the NAS reverse-proxy HTTPS port (avoids mixed content).
+// - If the UI is served over HTTPS, default to the NAS reverse-proxy HTTPS port for the backend.
+//   (In the current NAS deployment, https://<host>/api is NOT proxied and returns 404.)
 // - Otherwise, default to the direct backend port (e.g., Synology Container Manager port mapping).
 // You can always override with:
 // - `?backend=https://192.168.1.237:4443`

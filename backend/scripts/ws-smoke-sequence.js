@@ -3,6 +3,8 @@
 // Smoke test: set presence, then issue a second command, print clarifications.
 // Usage:
 //   node scripts/ws-smoke-sequence.js --transcript2 "Turn on the Apple TV" --room "Family Room"
+//   node scripts/ws-smoke-sequence.js --transcript2 "Watch Roku Basement" --auto true
+//   node scripts/ws-smoke-sequence.js --transcript2 "Watch Roku in Basement" --auto true --remote home --powerOff true
 
 const WebSocket = require('ws');
 
@@ -76,6 +78,58 @@ function waitForOneOf(ws, types, timeoutMs = 20000) {
   });
 }
 
+function pickCandidateIndex(clarification, args) {
+  const candidates = (clarification && Array.isArray(clarification.candidates)) ? clarification.candidates : [];
+  if (candidates.length === 0) return null;
+
+  const wantName = args.chooseName ? String(args.chooseName).toLowerCase() : '';
+  if (wantName) {
+    const i = candidates.findIndex((c) => {
+      const nm = (c && c.name) ? String(c.name).toLowerCase() : '';
+      const label = (c && c.label) ? String(c.label).toLowerCase() : '';
+      return nm.includes(wantName) || label.includes(wantName);
+    });
+    if (i >= 0) return i;
+  }
+
+  const idx = args.chooseIndex !== undefined ? Number(args.chooseIndex) : 0;
+  if (Number.isInteger(idx) && idx >= 0 && idx < candidates.length) return idx;
+  return 0;
+}
+
+async function sendTextCommandWithAutoClarify(ws, transcript, args) {
+  const auto = String(args.auto || 'false').toLowerCase() === 'true';
+
+  ws.send(JSON.stringify({ type: 'text-command', transcript }));
+
+  // Multi-step clarification loop.
+  // Note: remote-context may arrive out-of-band; we don't block on it here.
+  // We only care that clarification candidates are non-empty, and command completes.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const msg = await waitForOneOf(ws, ['command-complete', 'clarification-required', 'error'], 45000);
+    if (msg.type === 'clarification-required') {
+      const c = msg && msg.clarification ? msg.clarification : null;
+      const count = (c && Array.isArray(c.candidates)) ? c.candidates.length : 0;
+      console.log('Clarification:', c && c.kind ? c.kind : 'unknown', `(candidates=${count})`);
+
+      if (!auto) return msg;
+
+      const idx = pickCandidateIndex(c, args);
+      if (idx === null) {
+        console.log('No candidates to choose from; failing.');
+        return msg;
+      }
+
+      console.log('Auto-choosing index:', idx);
+      ws.send(JSON.stringify({ type: 'clarification-choice', choiceIndex: idx }));
+      continue;
+    }
+
+    return msg;
+  }
+}
+
 async function main() {
   const args = parseArgs(process.argv);
 
@@ -86,6 +140,9 @@ async function main() {
   const room = args.room || 'Family Room';
   const transcript1 = args.transcript1 || `I'm in the ${room}`;
   const transcript2 = args.transcript2 || 'Turn on the Apple TV';
+
+  const remoteButton = args.remote ? String(args.remote).trim() : '';
+  const doPowerOff = String(args.powerOff || 'false').toLowerCase() === 'true';
 
   const skipPresence = String(args.skipPresence || 'false').toLowerCase() === 'true';
 
@@ -110,7 +167,7 @@ async function main() {
     let msg;
     try { msg = JSON.parse(buf.toString()); } catch { return; }
     if (!msg || typeof msg !== 'object') return;
-    if (['intent', 'clarification-required', 'room-context', 'error'].includes(msg.type)) {
+    if (['intent', 'clarification-required', 'room-context', 'remote-context', 'error'].includes(msg.type)) {
       console.log('WS:', msg.type);
       if (msg.type === 'intent') console.log(JSON.stringify(msg.intent, null, 2));
       else console.log(JSON.stringify(msg, null, 2));
@@ -118,8 +175,7 @@ async function main() {
   });
 
   if (!skipPresence) {
-    ws.send(JSON.stringify({ type: 'text-command', transcript: transcript1 }));
-    const presenceResult = await waitForOneOf(ws, ['command-complete', 'clarification-required', 'error'], 45000);
+    const presenceResult = await sendTextCommandWithAutoClarify(ws, transcript1, args);
     console.log('Presence result:', presenceResult.type);
     if (presenceResult.type === 'error') {
       console.log(JSON.stringify(presenceResult, null, 2));
@@ -129,8 +185,7 @@ async function main() {
     }
   }
 
-  ws.send(JSON.stringify({ type: 'text-command', transcript: transcript2 }));
-  const msg = await waitForOneOf(ws, ['command-complete', 'clarification-required', 'error'], 45000);
+  const msg = await sendTextCommandWithAutoClarify(ws, transcript2, args);
   console.log('Command result:', msg.type);
 
   if (msg.type === 'clarification-required') {
@@ -141,6 +196,22 @@ async function main() {
     }, null, 2));
   } else {
     console.log(JSON.stringify(msg, null, 2).slice(0, 3000));
+  }
+
+  if (msg.type === 'command-complete' && remoteButton) {
+    console.log('Sending remote-control:', remoteButton);
+    ws.send(JSON.stringify({ type: 'remote-control', button: remoteButton }));
+    const r = await waitForOneOf(ws, ['command-complete', 'error'], 20000);
+    console.log('Remote result:', r.type);
+    if (r.type === 'error') console.log(JSON.stringify(r, null, 2));
+  }
+
+  if (msg.type === 'command-complete' && doPowerOff) {
+    console.log('Sending remote-control: power_off');
+    ws.send(JSON.stringify({ type: 'remote-control', button: 'power_off' }));
+    const r = await waitForOneOf(ws, ['remote-context', 'command-complete', 'error'], 30000);
+    console.log('Power-off result:', r.type);
+    if (r.type !== 'command-complete') console.log(JSON.stringify(r, null, 2));
   }
 
   ws.close();

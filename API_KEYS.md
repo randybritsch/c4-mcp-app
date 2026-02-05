@@ -53,10 +53,15 @@ You'll need:
 
 Where you set env vars depends on how you're running the backend:
 
-- **Synology Container Manager (Compose project):** set variables in the compose project environment (recommended) or an `.env` file consumed by the compose project.
+- **Synology Container Manager (Compose project):** set variables in the compose project environment, or via `env_file` pointing at a stable secrets file outside any repo checkout (recommended).
 - **Native Node.js process (legacy):** set variables in `backend/.env` and restart the Node process.
 
 ### Container Manager (recommended)
+
+Recommended pattern:
+- Keep a dedicated secrets file (example): `/volume1/dockerc4-mcp/c4-voice-secrets/backend.env`
+- Reference it from Compose using `env_file:`
+- Lock it down (example): `chmod 400 backend.env`
 
 In DSM **Container Manager → Projects → (your compose project, e.g. `c4-voice`)**, add/update backend environment variables:
 

@@ -106,6 +106,16 @@ header h1 {
   text-align: center;
 }
 
+.voice-section.remote-active {
+  padding: 20px;
+}
+
+.voice-section.remote-active .record-btn {
+  width: 110px;
+  height: 110px;
+  margin: 0 auto 14px;
+}
+
 .record-btn {
   width: 150px;
   height: 150px;
@@ -122,6 +132,105 @@ header h1 {
   justify-content: center;
   gap: 8px;
   margin: 0 auto 20px;
+}
+
+/* Remote Panel */
+.remote-panel {
+  margin: 0 auto 16px;
+  padding: 14px;
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+}
+
+.remote-title {
+  text-align: center;
+  font-size: 0.95rem;
+  font-weight: 700;
+  margin-bottom: 12px;
+  color: rgba(241, 241, 241, 0.9);
+}
+
+.remote-dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(3, 48px);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.remote-dpad .remote-btn[data-remote-button="up"] {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.remote-dpad .remote-btn[data-remote-button="left"] {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+.remote-dpad .remote-btn[data-remote-button="ok"] {
+  grid-column: 2;
+  grid-row: 2;
+}
+
+.remote-dpad .remote-btn[data-remote-button="right"] {
+  grid-column: 3;
+  grid-row: 2;
+}
+
+.remote-dpad .remote-btn[data-remote-button="down"] {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.remote-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.remote-row:last-child {
+  margin-bottom: 0;
+}
+
+.remote-btn {
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-color);
+  padding: 10px 10px;
+  border-radius: 12px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  transition: all 0.15s ease;
+  min-height: 44px;
+}
+
+.remote-btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.12);
+  transform: translateY(-1px);
+}
+
+.remote-btn:active:not(:disabled) {
+  transform: translateY(0px);
+}
+
+.remote-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.remote-ok {
+  background: rgba(233, 69, 96, 0.18);
+  border-color: rgba(233, 69, 96, 0.35);
+}
+
+.remote-power {
+  grid-column: 1 / -1;
+  background: rgba(233, 69, 96, 0.28);
+  border-color: rgba(233, 69, 96, 0.55);
 }
 
 .record-btn:hover:not(:disabled) {

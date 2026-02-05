@@ -93,6 +93,26 @@ function sendRoomContext(ws, room, source) {
   sendJson(ws, payload);
 }
 
+function sendRemoteContext(ws, remote, source) {
+  if (!remote || typeof remote !== 'object') return;
+
+  const payload = {
+    type: 'remote-context',
+    remote: {
+      active: Boolean(remote.active),
+      kind: remote.kind ? String(remote.kind) : null,
+      label: remote.label ? String(remote.label) : null,
+      room: remote.room && typeof remote.room === 'object' ? remote.room : undefined,
+      device: remote.device && typeof remote.device === 'object' ? remote.device : undefined,
+      updatedAt: remote.updatedAt || new Date().toISOString(),
+    },
+  };
+
+  if (source) payload.source = String(source);
+
+  sendJson(ws, payload);
+}
+
 function sendError(ws, { code, message, details } = {}) {
   const payload = {
     type: 'error',
@@ -116,5 +136,6 @@ module.exports = {
   sendClarificationRequired,
   sendCommandComplete,
   sendRoomContext,
+  sendRemoteContext,
   sendError,
 };

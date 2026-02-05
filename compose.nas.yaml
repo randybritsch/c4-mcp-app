@@ -34,8 +34,10 @@ services:
       - C4_MCP_TIMEOUT_MS=8000
       # Add tools here if needed (comma-separated)
       # - MCP_TOOL_ALLOWLIST=c4_list_rooms,c4_room_lights_set
+    # Keep secrets out of the build context and out of git.
+    # Create this file on the NAS once, then keep it stable.
     env_file:
-      - ./nas/backend/.env
+      - ./secrets/backend.env
     ports:
       - "3002:3000"
     restart: unless-stopped

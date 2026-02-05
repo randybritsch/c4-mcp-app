@@ -2,7 +2,7 @@
 
 ## Quick Start
 
-1. Copy the template: `cp .env.example .env`
+1. Create `.env` from the template (first run only): `test -f .env || cp .env.example .env`
 2. Edit `.env` with your actual credentials (see sections below)
 3. **Never commit `.env` to version control** (already in `.gitignore`)
 

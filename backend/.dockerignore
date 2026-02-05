@@ -3,4 +3,6 @@ npm-debug.log*
 logs
 *.log
 .env
+.env.*
+.env*
 .DS_Store

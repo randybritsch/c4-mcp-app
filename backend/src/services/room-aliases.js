@@ -5,6 +5,14 @@
 
 const roomAliasesByClientKey = new Map();
 
+// Built-in defaults for common ambiguous room queries.
+// These apply even before per-client clarification-based aliases.
+const DEFAULT_ROOM_NAME_ALIASES = new Map([
+  // User convention: "Basement" should default to the TV Room.
+  ['basement', 'TV Room'],
+  ['the basement', 'TV Room'],
+]);
+
 function normalizeRoomQuery(value) {
   return (value || '').toString().trim().toLowerCase();
 }
@@ -94,9 +102,34 @@ function applyRoomAliasToIntent({ ws, intent, logger }) {
   const args = intent && typeof intent === 'object' && intent.args && typeof intent.args === 'object'
     ? intent.args
     : null;
-  const clientKey = getClientKeyFromWs(ws);
-
   if (!args) return;
+
+  // Apply built-in room name aliases first (global behavior).
+  try {
+    if (!('room_id' in args)) {
+      const query = typeof args.room_name === 'string' ? args.room_name : null;
+      const normalizedQuery = normalizeRoomQuery(query);
+      const mapped = normalizedQuery ? DEFAULT_ROOM_NAME_ALIASES.get(normalizedQuery) : null;
+
+      // Keep this conservative: only rewrite the one currently-known hot path.
+      if (tool === 'c4_tv_watch_by_name' && mapped && normalizeRoomQuery(mapped) !== normalizedQuery) {
+        args.room_name = mapped;
+
+        if (logger && logger.info) {
+          logger.info('Applied default room alias', {
+            correlationId: ws?.correlationId,
+            tool,
+            from: normalizedQuery,
+            to: String(mapped),
+          });
+        }
+      }
+    }
+  } catch (e) {
+    // Best-effort only.
+  }
+
+  const clientKey = getClientKeyFromWs(ws);
   if (!clientKey) return;
 
   // Only apply to the one known-hot path for now.

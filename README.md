@@ -70,8 +70,9 @@ c4-mcp-app/
 ```bash
 cd backend
 npm install
-cp .env.example .env
-# Edit .env with your API keys
+# First run only (avoid overwriting an existing .env)
+test -f .env || cp .env.example .env
+# Edit .env with your API keys / endpoints
 npm start
 ```
 

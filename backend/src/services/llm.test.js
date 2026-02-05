@@ -25,6 +25,34 @@ describe('llm.parseIntent (Gemini decides)', () => {
     expect(intent).toEqual({ tool: 'c4_tv_off_last', args: {} });
   });
 
+  test('parses TV watch commands when LLM_PROVIDER=heuristic (Turn on the Basement Roku)', async () => {
+    const { parseIntent, restore } = loadParseIntentWithEnv({
+      LLM_PROVIDER: 'heuristic',
+    });
+
+    const intent = await parseIntent('Turn on the Basement Roku', 'corr-1');
+    restore();
+
+    expect(intent).toEqual({
+      tool: 'c4_tv_watch_by_name',
+      args: { room_name: 'Basement', source_device_name: 'Roku' },
+    });
+  });
+
+  test('does not misclassify light commands as TV watch (Turn on the Kitchen lights)', async () => {
+    const { parseIntent, restore } = loadParseIntentWithEnv({
+      LLM_PROVIDER: 'heuristic',
+    });
+
+    const intent = await parseIntent('Turn on the Kitchen lights', 'corr-1');
+    restore();
+
+    expect(intent).toEqual({
+      tool: 'c4_room_lights_set',
+      args: { room_name: 'Kitchen', state: 'on' },
+    });
+  });
+
   test('throws when OPENAI_API_KEY is missing (fallback disabled)', async () => {
     const { parseIntent, restore } = loadParseIntentWithEnv({
       LLM_PROVIDER: 'openai',

@@ -5,6 +5,7 @@ class App {
       status: document.getElementById('status'),
       statusDot: document.querySelector('.status-dot'),
       statusText: document.querySelector('.status-text'),
+      voiceSection: document.querySelector('.voice-section'),
       recordBtn: document.getElementById('recordBtn'),
       recordText: document.querySelector('.record-text'),
       statusMessage: document.getElementById('statusMessage'),
@@ -15,6 +16,8 @@ class App {
       clarificationChoices: document.getElementById('clarificationChoices'),
       commandLog: document.getElementById('commandLog'),
       currentRoomBanner: document.getElementById('currentRoomBanner'),
+      remotePanel: document.getElementById('remotePanel'),
+      remoteTitle: document.getElementById('remoteTitle'),
     };
 
     // Self-heal: if an older cached HTML is missing the banner element,
@@ -46,10 +49,143 @@ class App {
 
     this._executionTimeoutId = null;
 
+    this.remote = {
+      active: false,
+      kind: null,
+      label: null,
+    };
+
     // Make multiline diagnostics readable.
     if (this.elements.statusMessage) {
       this.elements.statusMessage.style.whiteSpace = 'pre-wrap';
     }
+
+    // Self-heal: older cached HTML may not include the remote panel.
+    if (!this.elements.remotePanel && this.elements.voiceSection) {
+      const panel = document.createElement('div');
+      panel.className = 'remote-panel';
+      panel.id = 'remotePanel';
+      panel.style.display = 'none';
+      panel.innerHTML = `
+        <div class="remote-title" id="remoteTitle">Remote</div>
+        <div class="remote-row"><button class="remote-btn" type="button" data-remote-button="mute">Mute</button></div>
+      `;
+      this.elements.voiceSection.insertBefore(panel, this.elements.statusMessage || null);
+      this.elements.remotePanel = panel;
+      this.elements.remoteTitle = panel.querySelector('#remoteTitle');
+    }
+  }
+
+  _setRemoteActive(active, { kind = null, label = null } = {}) {
+    this.remote.active = Boolean(active);
+    this.remote.kind = kind;
+    this.remote.label = label;
+
+    if (!this.elements.remotePanel || !this.elements.voiceSection) return;
+
+    if (this.remote.active) {
+      this.elements.voiceSection.classList.add('remote-active');
+      this.elements.remotePanel.style.display = 'block';
+      if (this.elements.remoteTitle) {
+        this.elements.remoteTitle.textContent = this.remote.label ? `Remote — ${this.remote.label}` : 'Remote';
+      }
+    } else {
+      this.elements.voiceSection.classList.remove('remote-active');
+      this.elements.remotePanel.style.display = 'none';
+      if (this.elements.remoteTitle) {
+        this.elements.remoteTitle.textContent = 'Remote';
+      }
+    }
+  }
+
+  _extractRemoteLabelFromMessage(message) {
+    if (!message || typeof message !== 'object') return null;
+    const intent = message.intent && typeof message.intent === 'object' ? message.intent : null;
+    const args = intent && intent.args && typeof intent.args === 'object' ? intent.args : {};
+
+    const room = this._extractRoomFromMessage(message);
+    const roomName = room && room.room_name ? String(room.room_name) : '';
+
+    const source = (args && typeof args.source_device_name === 'string') ? args.source_device_name.trim() : '';
+    const video = (args && typeof args.video_device_name === 'string') ? args.video_device_name.trim() : '';
+    const device = (args && typeof args.device_name === 'string') ? args.device_name.trim() : '';
+    const app = (args && typeof args.app === 'string') ? args.app.trim() : '';
+
+    const parts = [];
+    if (roomName) parts.push(roomName);
+    if (source) parts.push(source);
+    else if (video) parts.push(video);
+    else if (device) parts.push(device);
+    if (app) parts.push(app);
+
+    return parts.length ? parts.join(' — ') : null;
+  }
+
+  _maybeUpdateRemoteFromCommandComplete(message) {
+    const intent = message && message.intent && typeof message.intent === 'object' ? message.intent : null;
+    const tool = intent && intent.tool ? String(intent.tool) : '';
+    if (!tool) return;
+
+    // Turn remote ON after successful watch/app-launch commands.
+    const enablesRemote = new Set([
+      'c4_tv_watch',
+      'c4_tv_watch_by_name',
+      'c4_media_watch_launch_app',
+      'c4_media_watch_launch_app_by_name',
+      // Room-scoped watch equivalent (commonly used by Gemini plans).
+      'c4_room_select_video_device',
+
+      // If the user says "turn it on/mute/volume up" the model may pick a remote tool directly.
+      // Treat those as remote-capable contexts too.
+      'c4_tv_remote',
+      'c4_tv_remote_last',
+      'c4_media_remote',
+      'c4_media_remote_sequence',
+    ]);
+
+    // Turn remote OFF when a TV off command succeeds.
+    const disablesRemote = new Set([
+      'c4_tv_off',
+      'c4_tv_off_last',
+      'c4_room_off',
+    ]);
+
+    if (disablesRemote.has(tool)) {
+      this._setRemoteActive(false);
+      return;
+    }
+
+    if (enablesRemote.has(tool)) {
+      const label = this._extractRemoteLabelFromMessage(message);
+      this._setRemoteActive(true, { kind: 'tv', label });
+    }
+  }
+
+  _wireRemoteButtons() {
+    if (!this.elements.remotePanel) return;
+    const buttons = Array.from(this.elements.remotePanel.querySelectorAll('[data-remote-button]'));
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const button = btn.getAttribute('data-remote-button');
+        if (!button) return;
+
+        if (!wsClient || !wsClient.connected) {
+          this.showError('Not connected');
+          return;
+        }
+
+        // Avoid leaving the UI stuck if backend never replies.
+        this._startExecutionTimeout();
+
+        const pretty = button.replace(/_/g, ' ');
+        this.updateStatusMessage(`Remote: ${pretty}`);
+
+        wsClient.send({
+          type: 'remote-control',
+          button: String(button),
+        });
+      });
+    });
   }
 
   _extractRoomFromMessage(message) {
@@ -191,6 +327,9 @@ class App {
     // Record button
     this.elements.recordBtn.addEventListener('click', () => this.toggleRecording());
 
+    // Remote panel buttons
+    this._wireRemoteButtons();
+
     // WebSocket events
     wsClient.on('connected', () => {
       this.updateStatus('online', 'Connected');
@@ -203,6 +342,9 @@ class App {
       this.elements.recordBtn.disabled = true;
       this.showError('Connection lost. Reconnecting...');
       this._clearExecutionTimeout();
+
+      // UI should revert to normal layout while disconnected.
+      this._setRemoteActive(false);
     });
 
     wsClient.on('reconnect-failed', () => {
@@ -235,6 +377,15 @@ class App {
       if (room) this.setCurrentRoom(room);
     });
 
+    wsClient.on('remote-context', (message) => {
+      const remote = message && typeof message === 'object' ? (message.remote || message) : null;
+      if (!remote || typeof remote !== 'object') return;
+      const active = Boolean(remote.active);
+      const kind = remote.kind ? String(remote.kind) : null;
+      const label = remote.label ? String(remote.label) : null;
+      this._setRemoteActive(active, { kind, label });
+    });
+
     wsClient.on('command-complete', (message) => {
       this._clearExecutionTimeout();
       this.handleCommandComplete(message);
@@ -247,7 +398,27 @@ class App {
 
     wsClient.on('error', (message) => {
       this._clearExecutionTimeout();
-      this.showError(message.message || 'An error occurred');
+
+      const code = message && message.code ? String(message.code) : '';
+      const baseMessage = message && message.message ? String(message.message) : 'An error occurred';
+      let fullMessage = code ? `${code}: ${baseMessage}` : baseMessage;
+
+      if (message && message.details !== undefined) {
+        try {
+          console.warn('Server error details:', message.details);
+        } catch {
+          // ignore
+        }
+
+        try {
+          const pretty = JSON.stringify(message.details, null, 2);
+          fullMessage = `${fullMessage}\n\nDetails:\n${pretty}`;
+        } catch {
+          fullMessage = `${fullMessage}\n\nDetails:\n${String(message.details)}`;
+        }
+      }
+
+      this.showError(fullMessage);
       if (this.isRecording) {
         this.stopRecording();
       }
@@ -367,15 +538,22 @@ class App {
 
     // Clear any pending clarification UI.
     this.hideClarification();
+
+    // Best-effort remote UI updates (even if backend doesn't emit remote-context).
+    this._maybeUpdateRemoteFromCommandComplete(message);
     
     // Add to command history
-    this.addToCommandLog({
-      transcript: message.transcript,
-      intent: message.intent,
-      result: message.result,
-      timestamp: new Date(),
-      success: true,
-    });
+    const intentTool = message && message.intent && message.intent.tool ? String(message.intent.tool) : '';
+    const isRemoteButton = intentTool === 'c4_tv_remote_last' || intentTool === 'c4_tv_remote' || intentTool === 'c4_media_remote';
+    if (!isRemoteButton) {
+      this.addToCommandLog({
+        transcript: message.transcript,
+        intent: message.intent,
+        result: message.result,
+        timestamp: new Date(),
+        success: true,
+      });
+    }
 
     // Clear status after delay
     setTimeout(() => {

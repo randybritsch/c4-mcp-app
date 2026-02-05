@@ -18,7 +18,7 @@ npm install
 ### Configuration
 
 ```bash
-cp .env.example .env
+test -f .env || cp .env.example .env
 # Edit .env with your API keys and configuration
 ```
 
